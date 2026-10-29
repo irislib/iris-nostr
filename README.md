@@ -36,21 +36,92 @@ cargo install iris-nostr --locked
 
 ```sh
 iris-nostr graph fetch
-iris-nostr events query --relay wss://relay.primal.net --relay wss://relay.ditto.pub --kind 1 --limit 100
+iris-nostr events query --kind 1 --limit 100
 ```
 
-Queries filter by the social graph **by default**: at most two follow hops from
+Queries filter by the social graph **by default**: at most three follow hops from
 Sirius Business Ltd. Override with `--identity`, `--graph`, or `--max-distance`.
 Use `--no-social-filter` to explicitly opt out, including root mutes. Missing
 graph data is an error with setup instructions, never an unfiltered fallback.
 
 The CLI retrieves and filters; the calling agent handles semantic relevance,
 summarization and reasoning. No model runtime, Apple Intelligence, cloud model,
-API key, or particular agent vendor is required. `--contains TEXT` performs a
-case-insensitive match over the returned candidates, not a global text search.
+API key, or particular agent vendor is required. `--contains TEXT` matches
+content and descriptive tags (title, summary, alt, t, category, location) before
+the output limit. Repeat it for alternatives; matching is case-insensitive
+within fetched candidates, not a global text search.
 Use a sufficient `--limit`/`--fetch-limit` for your research question.
 
+Online CLI queries with no selected source use `temp.iris.to`, `vault.iris.to`,
+`relay.primal.net` and `relay.ditto.pub`. `--relay` or a source profile can
+replace that set. Selecting a file, stdin, cache, index or daemon suppresses
+fallback relays, as does `--offline`. Library callers always select sources.
+`iris-nostr config` shows the profile and defaults. Bootstrap download remains
+explicit: run `graph fetch` once before a default graph-filtered query.
+
 [Agent plugin installation](plugins/iris-nostr/README.md).
+
+## Discover posts, products and useful tags
+
+Start with words people use for the subject. For products, search listing kinds
+and try concrete names or synonyms rather than requiring a guessed hashtag:
+
+```sh
+iris-nostr events query --kind 30402 --kind 30018 \
+  --contains beef --contains pork --contains lamb --limit 20
+iris-nostr events tags --kind 30402 --contains beef --min-authors 1
+```
+
+`events tags` ranks observed `t` tags by **distinct public-key authors**, then
+by event count. The default requires two authors; `--min-authors 1` reveals
+niche tags. Duplicate events, repeated tags and repeated posts by one author
+do not inflate the author count. These are authors, not verified distinct people.
+Case variants are grouped, with exact spellings in `values` for relay queries.
+Counts describe the selected sample, not global popularity or semantic quality.
+`--limit` caps displayed tags; `--fetch-limit` controls the event sample.
+
+Inspect tags on relevant matches, then expand with observed categories:
+
+```sh
+# Example values: use tags actually observed in your results.
+iris-nostr events query --filter '{"kinds":[30402],"#t":["food","food & drink"]}'
+iris-nostr events tags --filter '{"kinds":[30402],"#t":["food & drink"]}' --min-authors 1
+```
+
+Alternatives inside one tag filter are OR; different filter fields narrow the
+query together. The second command discovers tags co-occurring in those events.
+A broad or popular tag may still be irrelevant. Use the returned content,
+location and context to judge relevance; keep untagged listings in the initial
+word-based search. Standard `--filter '{"search":"beef"}'` asks a relay for
+NIP-50 search when supported; a successful empty reply does not prove support.
+
+For sparse results, inspect each source's `counts`: fetched, graph-rejected,
+text-rejected, matched, and whether the candidate limit was reached. Increase
+`--fetch-limit`, change kinds or time bounds, or select another relay as needed.
+Graph filtering stays on unless explicitly opted out. `graph distance NPUB`
+explains an author's distance. A missing graph is an error, never a reason to
+silently disable filtering. Each result includes `follow_distance` when filtered.
+
+Check the newest observed version of a listing (same kind, author and `d` tag),
+its status, price, currency and location. An active listing is not confirmation
+of current stock. Preserve event IDs and distinguish listings from casual posts.
+No empty or successful bounded query establishes that something does not exist.
+
+An Iris Market `/NPUB/IDENTIFIER` URL uses the listing's `d` identifier, even
+when it looks like a 64-character event ID. Query it with `--author NPUB` and
+`--filter '{"kinds":[30402],"#d":["IDENTIFIER"]}'`, not `--id IDENTIFIER`.
+
+Keep discoveries locally without maintaining a separate tag database:
+
+```sh
+iris-nostr events sync --cache market-cache --kind 30402 --limit 1000
+iris-nostr events tags --cache market-cache --offline
+iris-nostr events query --cache market-cache --contains beef --offline
+```
+
+The same signed events in the Hashtree cache provide offline queries and tag
+counts. Sync records a bounded sample; partial fetches preserve the prior cache.
+
 
 ## Query events
 
@@ -81,8 +152,13 @@ by signed event ID. Inspect `partial`, source errors and the exit status.
 
 Success is **not** proof of complete Nostr history. Relays can omit events even
 after EOSE. Queries fetch at most `--fetch-limit` candidates per source (default
-1000, maximum 10000), apply graph policy, then return at most `--limit` results
+1000, maximum 10000), apply graph and text filters, then return at most `--limit` results
 (default 50). Filtering can therefore return fewer results than requested.
+Large graphs are checked locally to avoid oversized relay author lists.
+Small author sets (up to 200) are also sent to sources; explicit Nostr filters
+are always retained. Reports state `graph_filter_location`, eligible author
+count, actual relay URLs and per-source filtering counts. A large graph never
+requires opting out of policy or reducing the intended follow distance.
 Deadlines apply per source (`--timeout`, default 10 seconds, maximum 300).
 EOSE or the candidate budget terminates relay queries; connection failures,
 missing EOSE at the deadline, and lost messages are failures, not empty success.
@@ -109,7 +185,7 @@ iris-nostr decode "$PUBLIC_NOSTR_REFERENCE"
 `decode` supports `npub`, `nprofile`, `note`, `nevent`, and `naddr`, also with the
 `nostr:` URI prefix. It reports relay hints without contacting them. `--id`
 accepts hex, `note`, and `nevent`; `--author` and public identity options accept
-hex, `npub`, and `nprofile`. Select data sources explicitly. An exact ID does
+hex, `npub`, and `nprofile`. An exact ID does
 not bypass graph filtering. Decoding a reference does not verify an event.
 
 `events verify` checks event IDs and signatures without graph setup or network
@@ -161,7 +237,7 @@ copy its profile or secrets into this repository or an agent prompt.
 ```sh
 iris-nostr identity "$NPUB"
 iris-nostr events query --events notes.jsonl --graph follows.jsonl \
-  --identity "$NPUB" --max-distance 2 --offline
+  --identity "$NPUB" --max-distance 3 --offline
 iris-nostr graph distance "$OTHER_NPUB" --identity "$NPUB" --graph follows.jsonl
 ```
 
@@ -174,7 +250,7 @@ not zero. The default is the shared [nostr-social-graph bootstrap](https://githu
 captured on 2026-10-29 and pinned by checksum. It normalizes duplicate identity
 mappings before retaining complete lists for owners through two company-root
 hops, including third-hop targets. The 1.56 MB snapshot covers 411 identities
-within two hops. For another identity, supply a snapshot or signed lists that
+within two hops and 31,187 within three. For another identity, supply a snapshot or signed lists that
 cover its network. The entry point is a replaceable local preference, not a
 follow published in your name.
 
@@ -281,7 +357,9 @@ under `--offline`. Live app databases are never opened.
 
 Repeat `--events`, `--index`, or `--relay` to combine sources. Configured sources
 are additive, so explicit relay configuration causes relay queries even when
-local data exists. No hidden public relay defaults or remote HTTP APIs are used.
+local data exists. Fallback relays apply only to online CLI queries with no
+selected source; explicit local reads never acquire remote sources. No remote
+HTTP event API is used.
 
 ## Configuration
 
@@ -295,7 +373,7 @@ provided repeated flag replaces that configured list. Example:
   "events": ["notes.jsonl"],
   "graph": "follows.jsonl",
   "identity": "<your public hex key or npub>",
-  "max_distance": 2
+  "max_distance": 3
 }
 ```
 
@@ -339,7 +417,8 @@ See [RELEASING.md](RELEASING.md) for the locked build and publication gates.
 The `iris_nostr` Rust library exposes `Sources`, `Request`, `query`,
 `query_with_events` for in-memory input, `Sources::from_file`, cache read/merge
 operations, public reference helpers, graph loading and block access without
-CLI types. A native app can consume it if
+CLI types. `Request.contains` takes text alternatives (use an empty vector for
+no text filter), and `discovery::tag_counts` summarizes verified samples. A native app can consume it if
 this exact composition is useful; reusable protocol work belongs in the
 existing `nostr-pubsub`, Hashtree and social-graph crates. There is no extracted
 cross-app framework yet and no dependency on a particular LLM provider.

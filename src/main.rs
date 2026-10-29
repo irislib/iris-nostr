@@ -1,7 +1,8 @@
 use anyhow::{Context, Result, ensure};
 use clap::{Args, Parser, Subcommand};
 use iris_nostr::{
-    Request, Sources, cache, graph, io, query, query_with_events, reference, snapshot,
+    DEFAULT_MAX_DISTANCE, DEFAULT_RELAYS, Request, Sources, cache, discovery, graph, io, query,
+    query_with_events, reference, snapshot,
 };
 use nostr::{Filter, Kind, nips::nip19::ToBech32};
 use std::{io::Write, path::PathBuf, time::Duration};
@@ -57,7 +58,16 @@ enum Cache {
 }
 #[derive(Subcommand)]
 enum Events {
+    /// Find signed events with graph and optional text filters.
     Query(Box<Query>),
+    /// Discover t tags ranked by distinct authors in a bounded event sample.
+    Tags {
+        #[command(flatten)]
+        query: Box<Query>,
+        /// Minimum distinct authors per tag. Use 1 for niche discoveries.
+        #[arg(long, default_value_t = 2)]
+        min_authors: usize,
+    },
     /// Fetch a bounded sample and merge it into a portable Hashtree event cache.
     Sync {
         #[command(flatten)]
@@ -102,6 +112,8 @@ struct ProfileSources {
     graph: Option<PathBuf>,
     #[arg(long)]
     identity: Option<String>,
+    #[arg(long)]
+    max_distance: Option<u32>,
     #[arg(long)]
     no_social_filter: bool,
     #[arg(long)]
@@ -158,43 +170,54 @@ struct Query {
     /// Signed JSON or JSONL file. Use - once to read stdin.
     #[arg(long = "events")]
     events: Vec<PathBuf>,
+    /// Hashtree event-index root, as a CID or nhash.
     #[arg(long = "index")]
     indexes: Vec<String>,
+    /// Read-only exported block directory for --index.
     #[arg(long)]
     blocks: Option<PathBuf>,
     /// Existing htree daemon, e.g. http://127.0.0.1:8080. May use its peers.
     #[arg(long)]
     daemon: Option<String>,
+    /// Override default relays. Local sources and --offline suppress defaults.
     #[arg(long = "relay")]
     relays: Vec<String>,
+    /// Public graph root (default: Sirius Business Ltd).
     #[arg(long)]
     identity: Option<String>,
     /// Signed follow/mute JSON(L), or a trusted binary .bin graph snapshot.
     #[arg(long)]
     graph: Option<PathBuf>,
+    /// Maximum follow distance from the selected identity (default: 3).
     #[arg(long)]
     max_distance: Option<u32>,
     /// Opt out of the default social graph filter (including mutes).
     #[arg(long)]
     no_social_filter: bool,
-    /// Case-insensitive text match within fetched candidates (not global search).
+    /// Match content or descriptive tags before limiting results. Repeat for OR.
+    /// Case-insensitive; searches fetched candidates, not global history.
     #[arg(long)]
-    contains: Option<String>,
+    contains: Vec<String>,
     /// Ordinary Nostr filter JSON; the fetch budget caps its limit.
     #[arg(long, default_value = "{}")]
     filter: String,
+    /// Event kind; repeat for alternatives (1: posts, 30402: listings).
     #[arg(long)]
     kind: Vec<u16>,
+    /// Public author as hex, npub or nprofile. Repeat to match any.
     #[arg(long)]
     author: Vec<String>,
     /// Exact event ID as hex, note or nevent (also nostr: URIs). Repeat to match any.
-    /// Relay hints are not followed; select sources explicitly.
+    /// Relay hints are not followed automatically.
     #[arg(long)]
     id: Vec<String>,
+    /// Maximum matching events (or tags) returned.
     #[arg(long, default_value_t = 50)]
     limit: usize,
+    /// Maximum candidates per source before graph and text filters.
     #[arg(long, default_value_t = 1000)]
     fetch_limit: usize,
+    /// Deadline in seconds for each source.
     #[arg(long, default_value_t = 10)]
     timeout: u64,
     /// Strictly no networking, including local daemon access.
@@ -214,13 +237,31 @@ fn load_config(path: Option<PathBuf>) -> Result<Sources> {
     Sources::from_file(&path)
 }
 
+// Only the CLI opts into online defaults. Embedded library consumers keep
+// explicit sources, and local reads never silently acquire network sources.
+fn apply_relay_defaults(sources: &mut Sources, offline: bool) {
+    if !offline
+        && sources.events.is_empty()
+        && sources.cache.is_none()
+        && sources.indexes.is_empty()
+        && sources.blocks.is_none()
+        && sources.daemon.is_none()
+        && sources.relays.is_empty()
+    {
+        sources.relays = DEFAULT_RELAYS.iter().map(|url| (*url).into()).collect();
+    }
+}
+
 async fn run(cli: Cli) -> Result<i32> {
     let mut sources = load_config(cli.config)?;
     match cli.command {
         Command::Config => {
             println!(
                 "{}",
-                serde_json::json!({"sources":sources,"default_identity":snapshot::DEFAULT_IDENTITY,"default_graph":snapshot::cache_path()?,"sharing":"public source profile only; signing identities remain in their owning application"})
+                serde_json::json!({"sources":sources,"default_identity":snapshot::DEFAULT_IDENTITY,"default_graph":snapshot::cache_path()?,
+                "default_max_distance":DEFAULT_MAX_DISTANCE,"default_relays":DEFAULT_RELAYS,
+                "relay_default_rule":"online CLI queries only, when no source is selected; explicit local inputs and offline never add relays",
+                "sharing":"public source profile only; signing identities remain in their owning application"})
             );
         }
         Command::Cache {
@@ -354,18 +395,28 @@ async fn run(cli: Cli) -> Result<i32> {
             );
         }
         Command::Events {
-            command: command @ (Events::Query(_) | Events::Sync { .. }),
+            command: command @ (Events::Query(_) | Events::Sync { .. } | Events::Tags { .. }),
         } => {
-            let (args, sync) = match command {
-                Events::Query(args) => (args, None),
+            let (args, sync, tags) = match command {
+                Events::Query(args) => (args, None, None),
                 Events::Sync {
                     query,
                     max_events,
                     max_bytes,
-                } => (query, Some((max_events, max_bytes))),
+                } => (query, Some((max_events, max_bytes)), None),
+                Events::Tags { query, min_authors } => (query, None, Some(min_authors)),
                 _ => unreachable!(),
             };
             let args = *args;
+            ensure!((1..=10_000).contains(&args.limit), "limit must be 1..10000");
+            ensure!(
+                tags.is_none() || !args.jsonl,
+                "tags returns a JSON summary; omit --jsonl"
+            );
+            ensure!(
+                tags.is_none_or(|minimum| minimum > 0),
+                "min-authors must be at least 1"
+            );
             sources.cache = args.cache.or(sources.cache);
             let destination = if let Some((max_events, max_bytes)) = sync {
                 ensure!(
@@ -397,6 +448,7 @@ async fn run(cli: Cli) -> Result<i32> {
             sources.graph = args.graph.or(sources.graph);
             sources.max_distance = args.max_distance.or(sources.max_distance);
             sources.no_social_filter |= args.no_social_filter;
+            apply_relay_defaults(&mut sources, args.offline);
             let mut filter: Filter = serde_json::from_str(&args.filter)?;
             ensure!(
                 filter.search.is_none() || sources.indexes.is_empty(),
@@ -424,10 +476,15 @@ async fn run(cli: Cli) -> Result<i32> {
             let request = Request {
                 sources,
                 filter,
-                limit: args.limit,
+                limit: if tags.is_some() {
+                    args.fetch_limit
+                } else {
+                    args.limit
+                },
                 fetch_limit: args.fetch_limit,
                 timeout: Duration::from_secs(args.timeout),
                 offline: args.offline,
+                contains: args.contains,
             };
             let mut result = if stdin_count == 1 {
                 let events = io::read_events_from(std::io::stdin().lock())?;
@@ -435,17 +492,22 @@ async fn run(cli: Cli) -> Result<i32> {
             } else {
                 query(request).await?
             };
-            if let Some(text) = args.contains {
-                let needle = text.to_lowercase();
-                result["events"].as_array_mut().unwrap().retain(|row| {
-                    row["event"]["content"]
-                        .as_str()
-                        .unwrap_or("")
-                        .to_lowercase()
-                        .contains(&needle)
-                });
-                result["text_filter"] =
-                    serde_json::json!({"contains": text, "scope": "returned candidates only"});
+            if let Some(min_authors) = tags {
+                let events = result["events"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|row| serde_json::from_value(row["event"].clone()))
+                    .collect::<std::result::Result<Vec<nostr::Event>, _>>()?;
+                let mut counts = discovery::tag_counts(&events, min_authors);
+                let total_tags = counts.len();
+                counts.truncate(args.limit);
+                result.as_object_mut().unwrap().remove("events");
+                result["tags"] = serde_json::to_value(counts)?;
+                result["tag_sample"] = serde_json::json!({"events":events.len(),"min_authors":min_authors,
+                    "qualifying_tags":total_tags,"scope":"queried sample after graph and text filters; not global popularity"});
+                println!("{result}");
+                return Ok(if result["partial"] == true { 3 } else { 0 });
             }
             let partial = result["partial"] == true;
             if let Some(destination) = destination {
@@ -495,6 +557,7 @@ async fn profiles(mut sources: Sources, command: Profiles) -> Result<i32> {
     sources.daemon = args.daemon.or(sources.daemon);
     sources.graph = args.graph.or(sources.graph);
     sources.identity = args.identity.or(sources.identity);
+    sources.max_distance = args.max_distance.or(sources.max_distance);
     sources.no_social_filter |= args.no_social_filter;
     if !args.relays.is_empty() {
         sources.relays = args.relays;
@@ -509,6 +572,7 @@ async fn profiles(mut sources: Sources, command: Profiles) -> Result<i32> {
     } else {
         None
     };
+    apply_relay_defaults(&mut sources, args.offline);
     let request = |sources| Request {
         sources,
         filter: Filter::new().author(pubkey).kind(Kind::Metadata),
@@ -516,6 +580,7 @@ async fn profiles(mut sources: Sources, command: Profiles) -> Result<i32> {
         fetch_limit: 1000,
         timeout: Duration::from_secs(args.timeout),
         offline: args.offline,
+        contains: Vec::new(),
     };
     let mut report = query(request(sources.clone())).await?;
     let partial = report["partial"] == true;

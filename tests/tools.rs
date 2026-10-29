@@ -30,6 +30,98 @@ fn cli(args: &[&str], input: &[u8]) -> Output {
     child.stdin.take().unwrap().write_all(input).unwrap();
     child.wait_with_output().unwrap()
 }
+
+#[test]
+fn text_matching_precedes_limit_and_local_stdin_does_not_add_relays() {
+    let keys = Keys::generate();
+    let wanted = EventBuilder::new(Kind::from(30402), "")
+        .tags([Tag::parse(["title", "Grass-fed Beef Box"]).unwrap()])
+        .custom_created_at(Timestamp::from(1))
+        .sign_with_keys(&keys)
+        .unwrap();
+    let unrelated = EventBuilder::new(Kind::from(30402), "newer unrelated listing")
+        .custom_created_at(Timestamp::from(2))
+        .sign_with_keys(&keys)
+        .unwrap();
+    let bytes = serde_json::to_vec(&[unrelated, wanted.clone()]).unwrap();
+    let out = cli(
+        &[
+            "events",
+            "query",
+            "--events",
+            "-",
+            "--no-social-filter",
+            "--limit",
+            "1",
+            "--contains",
+            "pork",
+            "--contains",
+            "BEEF",
+        ],
+        &bytes,
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(report["events"].as_array().unwrap().len(), 1);
+    assert_eq!(report["events"][0]["event"]["id"], wanted.id.to_hex());
+    assert_eq!(report["sources"].as_array().unwrap().len(), 1);
+    assert_eq!(report["sources"][0]["source"], "input");
+    assert_eq!(report["sources"][0]["counts"]["text_rejected"], 1);
+    let out = cli(&["events", "query", "--offline", "--no-social-filter"], b"");
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("choose an events file"));
+}
+
+#[test]
+fn tag_discovery_counts_authors_not_posts_and_preserves_exact_spellings() {
+    let a = Keys::generate();
+    let b = Keys::generate();
+    let make = |key: &Keys, time, values: &[&str]| {
+        EventBuilder::new(Kind::from(30402), "beef")
+            .tags(values.iter().map(|v| Tag::parse(["t", *v]).unwrap()))
+            .custom_created_at(Timestamp::from(time))
+            .sign_with_keys(key)
+            .unwrap()
+    };
+    let first = make(&a, 1, &["Food", "Food", "food", "milkmarket"]);
+    let events = vec![
+        first.clone(),
+        first,
+        make(&a, 2, &["food", "milkmarket"]),
+        make(&b, 3, &["food"]),
+    ];
+    let counts = iris_nostr::discovery::tag_counts(&events, 2);
+    assert_eq!(counts.len(), 1);
+    assert_eq!(counts[0].authors, 2);
+    assert_eq!(counts[0].events, 3);
+    assert_eq!(counts[0].values, vec!["Food", "food"]);
+    let out = cli(
+        &[
+            "events",
+            "tags",
+            "--events",
+            "-",
+            "--offline",
+            "--no-social-filter",
+            "--limit",
+            "1",
+        ],
+        &serde_json::to_vec(&events).unwrap(),
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(report["tags"][0]["authors"], 2);
+    assert_eq!(report["tag_sample"]["events"], 3);
+    assert!(report.get("events").is_none());
+}
 #[test]
 fn public_reference_forms_preserve_metadata_and_types() {
     let key = Keys::generate().public_key();
@@ -270,6 +362,7 @@ async fn caller_supplied_events_are_verified_before_graph_policy() {
         fetch_limit: 1,
         timeout: std::time::Duration::from_secs(1),
         offline: true,
+        contains: Vec::new(),
     };
     assert!(
         iris_nostr::query_with_events(request, vec![event])

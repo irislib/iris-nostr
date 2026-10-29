@@ -1,6 +1,7 @@
 //! Model-independent read API. No signing keys, UI types, or messaging state.
 pub mod blocks;
 pub mod cache;
+pub mod discovery;
 pub mod graph;
 pub mod io;
 pub mod reference;
@@ -17,9 +18,22 @@ use nostr_pubsub_social_graph::{GraphDistanceAction, SocialGraphPolicy, SocialGr
 use serde::{Deserialize, Serialize};
 use std::{
     path::PathBuf,
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex, RwLock},
     time::Duration,
 };
+
+pub const DEFAULT_MAX_DISTANCE: u32 = 3;
+/// CLI fallback for online discovery without an explicitly selected source.
+pub const DEFAULT_RELAYS: &[&str] = &[
+    "wss://temp.iris.to",
+    "wss://vault.iris.to",
+    "wss://relay.primal.net",
+    "wss://relay.ditto.pub",
+];
+
+// Keep generated REQs small. Larger graphs are enforced locally within the
+// same candidate budget; user-supplied Nostr filters remain intact.
+const MAX_PUSHED_GRAPH_AUTHORS: usize = 200;
 
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -67,6 +81,8 @@ pub struct Request {
     pub fetch_limit: usize,
     pub timeout: Duration,
     pub offline: bool,
+    /// Case-insensitive alternatives over content and descriptive tags.
+    pub contains: Vec<String>,
 }
 
 struct AcceptAll;
@@ -89,6 +105,17 @@ struct CheckedSource {
     policy: Arc<dyn PubsubPolicy>,
     timeout: Duration,
     fetch_limit: usize,
+    contains: Arc<Vec<String>>,
+    stats: Arc<Mutex<Option<SourceStats>>>,
+}
+
+#[derive(Default, Serialize)]
+struct SourceStats {
+    fetched: usize,
+    graph_rejected: usize,
+    text_rejected: usize,
+    matched: usize,
+    candidate_limit_reached: bool,
 }
 #[async_trait]
 impl EventBus for CheckedSource {
@@ -104,6 +131,12 @@ impl EventBus for CheckedSource {
         filters: Vec<Filter>,
         options: QueryOptions,
     ) -> nostr_pubsub::Result<QueryReport> {
+        let candidate_limit = filters
+            .iter()
+            .filter_map(|f| f.limit)
+            .max()
+            .unwrap_or(self.fetch_limit)
+            .min(self.fetch_limit);
         let mut report = tokio::time::timeout(
             self.timeout,
             self.bus.query(
@@ -115,9 +148,14 @@ impl EventBus for CheckedSource {
         )
         .await
         .map_err(|_| PubsubError::Storage("source deadline exceeded".into()))??;
+        let mut stats = SourceStats {
+            fetched: report.events.len(),
+            candidate_limit_reached: report.events.len() >= candidate_limit,
+            ..Default::default()
+        };
         let mut accepted = Vec::new();
         for row in report.events.drain(..) {
-            if !matches!(
+            if matches!(
                 self.policy
                     .check_event(EventPolicyContext {
                         event: &row.event,
@@ -126,9 +164,15 @@ impl EventBus for CheckedSource {
                     .await?,
                 PolicyDecision::Drop { .. }
             ) {
+                stats.graph_rejected += 1;
+            } else if !discovery::matches_text(row.event.as_event(), &self.contains) {
+                stats.text_rejected += 1;
+            } else {
                 accepted.push(row);
             }
         }
+        stats.matched = accepted.len();
+        *self.stats.lock().unwrap() = Some(stats);
         accepted.truncate(options.limit.unwrap_or(self.fetch_limit));
         Ok(QueryReport { events: accepted })
     }
@@ -168,6 +212,10 @@ async fn query_inner(
     input: Option<Vec<VerifiedEvent>>,
 ) -> Result<serde_json::Value> {
     ensure!(
+        request.contains.iter().all(|text| !text.trim().is_empty()),
+        "contains terms must not be empty"
+    );
+    ensure!(
         (1..=10_000).contains(&request.limit),
         "limit must be 1..10000"
     );
@@ -187,7 +235,10 @@ async fn query_inner(
         if request.sources.graph.is_none() {
             request.sources.graph = Some(snapshot::cache_path()?);
         }
-        request.sources.max_distance.get_or_insert(2);
+        request
+            .sources
+            .max_distance
+            .get_or_insert(DEFAULT_MAX_DISTANCE);
     }
     let sources = &request.sources;
     ensure!(
@@ -216,6 +267,9 @@ async fn query_inner(
         "max-distance requires a graph snapshot"
     );
     let mut filter = request.filter.clone();
+    let mut graph_state = None;
+    let mut graph_author_count = None;
+    let mut graph_filter_location = None;
     let policy: Arc<dyn PubsubPolicy> = if !sources.no_social_filter
         && let Some(path) = &sources.graph
     {
@@ -236,21 +290,27 @@ async fn query_inner(
                     .is_none_or(|specified| specified.contains(author))
             })
             .collect::<std::collections::BTreeSet<_>>();
+        graph_author_count = Some(authors.len());
         // An empty authors filter may be widened by relays. Return without networking.
         if authors.is_empty() {
             return Ok(
                 serde_json::json!({"schema_version":1,"events":[],"sources":[],"partial":false,
                 "social_filter":true,"identity":graph.get_root(),"max_distance":sources.max_distance,
+                "graph_author_count":0,"filter":request.filter,
+                "text_filter":request.contains,
                 "coverage":"no authors match the selected graph snapshot"}),
             );
         }
-        ensure!(
-            authors.len() <= 20_000,
-            "graph author set exceeds 20000; lower --max-distance or select --author"
-        );
-        filter.authors = Some(authors);
+        graph_filter_location = Some(if authors.len() <= MAX_PUSHED_GRAPH_AUTHORS {
+            filter.authors = Some(authors);
+            "source-and-local"
+        } else {
+            "local"
+        });
+        let graph = Arc::new(RwLock::new(graph));
+        graph_state = Some(graph.clone());
         Arc::new(SocialGraphPolicy::new(
-            Arc::new(RwLock::new(graph)),
+            graph,
             SocialGraphPolicyConfig {
                 max_follow_distance: sources.max_distance,
                 outside_graph_action: if sources.max_distance.is_some() {
@@ -334,7 +394,11 @@ async fn query_inner(
         ));
     }
     let mut router = NostrPubsubRouter::new(Arc::new(AcceptAll));
+    let contains = Arc::new(request.contains.iter().map(|s| s.to_lowercase()).collect());
+    let mut source_stats = std::collections::HashMap::new();
     for (route, bus) in buses {
+        let stats = Arc::new(Mutex::new(None));
+        source_stats.insert(route.id.clone(), stats.clone());
         router = router.with_query_source(RouterQuerySource::new(
             route,
             Arc::new(CheckedSource {
@@ -342,6 +406,8 @@ async fn query_inner(
                 policy: policy.clone(),
                 timeout: request.timeout,
                 fetch_limit: request.fetch_limit,
+                contains: Arc::clone(&contains),
+                stats,
             }),
         ));
     }
@@ -368,19 +434,35 @@ async fn query_inner(
         .events
         .iter()
         .map(|row| {
+            let follow_distance = graph_state.as_ref().map(|graph| {
+                graph
+                    .read()
+                    .unwrap()
+                    .get_follow_distance(&row.event.as_event().pubkey.to_hex())
+            });
             serde_json::json!({
                 "event": row.event.as_event(),
+                "follow_distance": follow_distance,
                 "sources": row.provenance.iter().map(|p| p.route_id.clone()).collect::<Vec<_>>()
             })
         })
         .collect::<Vec<_>>();
-    let attempts = report.attempts.iter().map(|attempt| match &attempt.outcome {
-        RouteAttemptOutcome::Success { event_count } => serde_json::json!({"source": attempt.route.id, "ok": true, "event_count": event_count}),
-        RouteAttemptOutcome::Failure { message } => serde_json::json!({"source": attempt.route.id, "ok": false, "error": message}),
-    }).collect::<Vec<_>>();
+    let attempts = report.attempts.iter().map(|attempt| {
+        let mut result = match &attempt.outcome {
+            RouteAttemptOutcome::Success { event_count } => serde_json::json!({"source": attempt.route.id, "ok": true, "event_count": event_count}),
+            RouteAttemptOutcome::Failure { message } => serde_json::json!({"source": attempt.route.id, "ok": false, "error": message}),
+        };
+        if let Some(index) = attempt.route.id.strip_prefix("relay-").and_then(|s| s.parse::<usize>().ok()) {
+            result["relay"] = serde_json::to_value(&relay_urls[index])?;
+        }
+        result["counts"] = serde_json::to_value(&*source_stats[&attempt.route.id].lock().unwrap())?;
+        Ok::<_, anyhow::Error>(result)
+    }).collect::<Result<Vec<_>>>()?;
     Ok(serde_json::json!({
         "schema_version": 1, "events": events, "sources": attempts,
         "social_filter": !sources.no_social_filter, "max_distance": sources.max_distance,
+        "graph_author_count":graph_author_count,"graph_filter_location":graph_filter_location,
+        "filter":request.filter,"text_filter":request.contains,
         "partial": !report.complete,
         "coverage": "bounded; source success does not prove complete Nostr history",
         "fetch_limit_per_source": request.fetch_limit,

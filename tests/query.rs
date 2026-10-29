@@ -23,6 +23,7 @@ fn request(mut sources: Sources) -> Request {
         fetch_limit: 1000,
         timeout: Duration::from_secs(2),
         offline: true,
+        contains: Vec::new(),
     }
 }
 
@@ -307,13 +308,143 @@ async fn relay_query_waits_for_eose_and_filters_irrelevant_events() {
         }
     });
     let mut req = request(Sources {
-        relays: vec![url],
+        relays: vec![url.clone()],
         ..Default::default()
     });
     req.offline = false;
     let report = query(req).await.unwrap();
     assert_eq!(report["partial"], false);
+    assert_eq!(report["sources"].as_array().unwrap().len(), 1);
+    assert_eq!(report["sources"][0]["relay"], url);
     assert_eq!(report["events"][0]["event"]["id"], expected.to_hex());
+    relay.abort();
+}
+
+#[tokio::test]
+async fn default_three_hops_includes_third_but_not_fourth_and_honors_override() {
+    let dir = TempDir::new().unwrap();
+    let keys: Vec<_> = (0..5).map(|_| Keys::generate()).collect();
+    let root = keys[0].public_key().to_hex();
+    let mut graph = nostr_social_graph::SocialGraph::new(&root);
+    for pair in keys.windows(2) {
+        graph
+            .add_positive_relation(
+                &pair[0].public_key().to_hex(),
+                &pair[1].public_key().to_hex(),
+                1,
+            )
+            .unwrap();
+    }
+    let graph_path = dir.path().join("graph.bin");
+    std::fs::write(&graph_path, graph.to_binary().unwrap()).unwrap();
+    let third = note(&keys[3], 3, "third");
+    let events = save(
+        &dir,
+        "events.json",
+        &[third.clone(), note(&keys[4], 4, "fourth")],
+    );
+    let sources = Sources {
+        events: vec![events],
+        identity: Some(root),
+        graph: Some(graph_path),
+        ..Default::default()
+    };
+    let report = query(request(sources.clone())).await.unwrap();
+    assert_eq!(report["events"].as_array().unwrap().len(), 1);
+    assert_eq!(report["events"][0]["event"]["id"], third.id.to_hex());
+    assert_eq!(report["events"][0]["follow_distance"], 3);
+    let report = query(request(Sources {
+        max_distance: Some(2),
+        ..sources
+    }))
+    .await
+    .unwrap();
+    assert!(report["events"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn large_graph_uses_bounded_local_policy_without_oversized_relay_filters() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::{accept_async, tungstenite::Message};
+    let dir = TempDir::new().unwrap();
+    let owner = Keys::generate();
+    let friend = Keys::generate();
+    let muted = Keys::generate();
+    let root = owner.public_key().to_hex();
+    let mut graph = nostr_social_graph::SocialGraph::new(&root);
+    for i in 1..=20_001 {
+        graph
+            .add_positive_relation(&root, &format!("{i:064x}"), 1)
+            .unwrap();
+    }
+    graph
+        .add_positive_relation(&root, &friend.public_key().to_hex(), 1)
+        .unwrap();
+    graph
+        .add_positive_relation(&root, &muted.public_key().to_hex(), 1)
+        .unwrap();
+    graph
+        .add_negative_relation(&root, &muted.public_key().to_hex(), 1)
+        .unwrap();
+    let path = dir.path().join("graph.bin");
+    std::fs::write(&path, graph.to_binary().unwrap()).unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}", listener.local_addr().unwrap());
+    let accepted = note(&friend, 1, "beef");
+    let expected = accepted.id.to_hex();
+    let relay = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut ws = accept_async(stream).await.unwrap();
+        let value = loop {
+            let message = ws.next().await.unwrap().unwrap();
+            if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&message.into_data())
+                && value[0] == "REQ"
+            {
+                break value;
+            }
+        };
+        assert_eq!(value[0], "REQ");
+        assert!(value[2].get("authors").is_none());
+        assert_eq!(value[2]["kinds"], serde_json::json!([1]));
+        assert_eq!(value[2]["limit"], 1000);
+        for event in [
+            note(&Keys::generate(), 4, "stranger"),
+            note(&muted, 3, "muted"),
+            note(&friend, 2, "unrelated"),
+            accepted,
+        ] {
+            ws.send(Message::Text(
+                serde_json::json!(["EVENT", value[1], event])
+                    .to_string()
+                    .into(),
+            ))
+            .await
+            .unwrap();
+        }
+        ws.send(Message::Text(
+            serde_json::json!(["EOSE", value[1]]).to_string().into(),
+        ))
+        .await
+        .unwrap();
+        while ws.next().await.is_some() {}
+    });
+    let mut req = request(Sources {
+        relays: vec![url],
+        identity: Some(root),
+        graph: Some(path),
+        ..Default::default()
+    });
+    req.offline = false;
+    req.limit = 1;
+    req.contains = vec!["BEEF".into()];
+    let report = query(req).await.unwrap();
+    assert_eq!(report["partial"], false);
+    assert_eq!(report["graph_filter_location"], "local");
+    assert!(report["graph_author_count"].as_u64().unwrap() > 20_000);
+    assert_eq!(report["events"].as_array().unwrap().len(), 1);
+    assert_eq!(report["events"][0]["event"]["id"], expected);
+    assert_eq!(report["sources"][0]["counts"]["graph_rejected"], 2);
+    assert_eq!(report["sources"][0]["counts"]["text_rejected"], 1);
     relay.abort();
 }
 
@@ -449,7 +580,7 @@ async fn default_policy_filters_without_explicit_distance_and_optout_includes_st
     };
     let report = query(request(sources.clone())).await.unwrap();
     assert_eq!(report["social_filter"], true);
-    assert_eq!(report["max_distance"], 2);
+    assert_eq!(report["max_distance"], 3);
     assert_eq!(report["events"].as_array().unwrap().len(), 1);
     let mut req = request(sources);
     req.sources.no_social_filter = true;

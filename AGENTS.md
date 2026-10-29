@@ -7,7 +7,7 @@ I/O, including through a local daemon. Keep library APIs free of CLI types.
 Use locked builds and test with synthetic identities and local fixtures.
 
 Default public graph entry point: Sirius Business Ltd; graph filtering defaults to
-two hops, with explicit --no-social-filter opt-out. Never silently widen a query
+three hops, with explicit --no-social-filter opt-out. Never silently widen a query
 when the graph is missing. Model inference belongs to the calling agent.
 Keep private data out of commits and Cargo/plugin archives. See RELEASING.md.
 
@@ -22,3 +22,9 @@ Profiles are kind-0 events in that same cache. Keep continuous graph crawling
 with the existing Hashtree service; refresh is explicit, bootstrap is pinned.
 Default graph entry points must have covered bootstrap data. Do not replace
 a sibling's constant without checking its cold-start graph coverage.
+
+The README is the canonical discovery guide for humans and agents. Keep the
+plugin skill concise. CLI relay defaults apply only without selected sources;
+never add networking to a local or offline read. Preserve explicit Nostr
+filters when enforcing large graphs locally. Count tag popularity by distinct
+full public keys over verified samples, not raw post volume or key prefixes.

@@ -123,6 +123,7 @@ pub async fn fetch(
         "digest_pinned":expected.is_some(),"identity":graph.get_root(),
         "direct_follows":graph.get_followed_by_user(graph.get_root()).len(),
         "authors_within_two_hops":graph.users_in_distance_order(Some(2)).len(),
+        "authors_within_three_hops":graph.users_in_distance_order(Some(3)).len(),
         "source":url.as_str(),"trust":"binary graph snapshot, not individually signed events"}),
     )
 }

@@ -64,6 +64,7 @@ pub fn status(identity: &str, path: &Path) -> Result<serde_json::Value> {
         "root_follow_list_known":graph.get_follow_list_created_at(graph.get_root()).is_some(),
         "users":stats.users,"follows":stats.follows,"mutes":stats.mutes,
         "authors_within_two_hops":graph.users_in_distance_order(Some(2)).len(),
+        "authors_within_three_hops":graph.users_in_distance_order(Some(3)).len(),
         "coverage":"observed lists; file time and event timestamps do not prove freshness or complete coverage"}),
     )
 }

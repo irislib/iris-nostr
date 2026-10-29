@@ -29,6 +29,7 @@ async fn read(path: &Path) -> serde_json::Value {
         fetch_limit: 100,
         timeout: Duration::from_secs(5),
         offline: true,
+        contains: Vec::new(),
     })
     .await
     .unwrap()

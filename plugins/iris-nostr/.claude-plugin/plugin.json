@@ -1,6 +1,6 @@
 {
   "name": "iris-nostr",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Find public Nostr posts using social graph filters, Hashtree indexes and relays.",
   "author": {
     "name": "Sirius Business Ltd"
