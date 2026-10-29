@@ -1,6 +1,6 @@
 [package]
 name = "iris-nostr"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.99"
 license = "MIT"
@@ -23,6 +23,8 @@ anyhow = "1"
 async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }
 hashtree-core = "=0.2.91"
+hashtree-fs = "=0.2.83"
+hashtree-nostr = "=0.2.90"
 hashtree-nostr-pubsub = "=0.2.87"
 nostr = "=0.44.7"
 nostr-pubsub = "=0.1.19"
@@ -37,7 +39,6 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 tempfile = "3"
 
 [dev-dependencies]
-hashtree-nostr = "=0.2.90"
 tokio-tungstenite = "0.26"
 futures-util = "0.3"
 

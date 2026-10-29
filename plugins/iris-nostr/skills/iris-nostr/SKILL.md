@@ -66,3 +66,25 @@ Preserve upstream exit statuses with `set -o pipefail` when composing commands.
 Standard signed-event JSONL can come from nak; it is not a runtime dependency.
 Keep nak for broad signing/publishing, relay administration and protocol tools.
 These remain separate operations requiring the user's authorization.
+
+Use `graph status` to inspect coverage and observed root-list timestamps.
+`graph fetch` restores a pinned bootstrap; for updates use `graph refresh` with
+an explicitly trusted `--url` or selected existing `--daemon`. The Hashtree
+service owns continuous crawling. Never equate local file time with freshness.
+
+For persistent local indexing, use `events sync --cache DIR` with query filters
+and explicit fetch sources, then `events query --cache DIR --offline`. Sync
+merges a bounded sample into a Hashtree index without publishing. A partial
+fetch leaves its prior checkpoint unchanged. `cache status --cache DIR` shows
+retention and coverage. Logical event limits do not cap old immutable blobs on
+disk; do not garbage-collect a shared directory on your own.
+
+Use `profiles refresh NPUB --cache DIR --relay URL` to update signed kind-0
+metadata in the same cache, and `profiles get NPUB --cache DIR --offline` to
+read it. Both retain graph filtering. Empty refreshes preserve observed metadata;
+latest observed does not mean current everywhere. No separate profile store.
+
+`--config FILE` or `IRIS_NOSTR_CONFIG` selects a reusable public source profile;
+`config` displays it. Share explicit public identities, snapshots and compatible
+Hashtree cache paths across tools when their owners support them. Keep signing
+keys with their owning apps and respect an explicitly selected personal root.

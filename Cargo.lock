@@ -807,6 +807,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "hashtree-fs"
+version = "0.2.83"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fabc8edf8e6fe37914fcbea0a1a8dca6c7642c6ad00c4459b58fb617ba246914"
+dependencies = [
+ "async-trait",
+ "hashtree-core",
+ "hex",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "hashtree-index"
 version = "0.2.85"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1196,13 +1210,14 @@ checksum = "791930b43c0d5973160d90a8f3894509f2b273430f5c5c73b668636d0287c5c0"
 
 [[package]]
 name = "iris-nostr"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
  "clap",
  "futures-util",
  "hashtree-core",
+ "hashtree-fs",
  "hashtree-nostr",
  "hashtree-nostr-pubsub",
  "nostr",

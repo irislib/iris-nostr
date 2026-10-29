@@ -1,5 +1,6 @@
 //! Model-independent read API. No signing keys, UI types, or messaging state.
 pub mod blocks;
+pub mod cache;
 pub mod graph;
 pub mod io;
 pub mod reference;
@@ -23,6 +24,7 @@ use std::{
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Sources {
+    pub cache: Option<PathBuf>,
     pub events: Vec<PathBuf>,
     pub indexes: Vec<String>,
     pub blocks: Option<PathBuf>,
@@ -32,6 +34,30 @@ pub struct Sources {
     pub graph: Option<PathBuf>,
     pub max_distance: Option<u32>,
     pub no_social_filter: bool,
+}
+
+impl Sources {
+    /// Public source profile; usable by native consumers without CLI types.
+    pub fn from_file(path: &std::path::Path) -> Result<Self> {
+        let mut sources: Self = serde_json::from_slice(&io::read_bounded(path)?)?;
+        let base = path.parent().unwrap_or(std::path::Path::new("."));
+        for entry in &mut sources.events {
+            if entry.is_relative() && entry != std::path::Path::new("-") {
+                *entry = base.join(&*entry);
+            }
+        }
+        for entry in sources
+            .blocks
+            .iter_mut()
+            .chain(sources.graph.iter_mut())
+            .chain(sources.cache.iter_mut())
+        {
+            if entry.is_relative() {
+                *entry = base.join(&*entry);
+            }
+        }
+        Ok(sources)
+    }
 }
 
 pub struct Request {
@@ -174,6 +200,7 @@ async fn query_inner(
     );
     ensure!(
         !sources.events.is_empty()
+            || sources.cache.is_some()
             || input.is_some()
             || !sources.indexes.is_empty()
             || !sources.relays.is_empty()
@@ -248,6 +275,13 @@ async fn query_inner(
         .map(blocks::daemon_url)
         .transpose()?;
     let mut buses: Vec<(SourceRoute, Arc<dyn EventBus>)> = Vec::new();
+    if let Some(path) = &sources.cache {
+        let (_, bus) = cache::reader(path, "cache")?;
+        buses.push((
+            SourceRoute::local_index("cache").with_dataset("cache")?,
+            Arc::new(bus),
+        ));
+    }
     if let Some(events) = input {
         let id = "input";
         let bus = Arc::new(InMemoryEventBus::new());

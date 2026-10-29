@@ -31,3 +31,8 @@ profiles/
 /.haps/
 /config.json
 /releases/
+
+# Portable event cache checkpoints and locks may contain private query history.
+**/state.json
+**/.writer.lock
+**/blobs/
