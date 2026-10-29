@@ -127,13 +127,13 @@ fn load_config(path: Option<PathBuf>) -> Result<Sources> {
     };
     let mut config: Sources = serde_json::from_slice(&io::read_bounded(&path)?)?;
     let base = path.parent().unwrap_or(std::path::Path::new("."));
-    for entry in config
-        .events
-        .iter_mut()
-        .chain(config.blocks.iter_mut())
-        .chain(config.graph.iter_mut())
-    {
+    for entry in &mut config.events {
         if entry.is_relative() && entry != std::path::Path::new("-") {
+            *entry = base.join(&*entry);
+        }
+    }
+    for entry in config.blocks.iter_mut().chain(config.graph.iter_mut()) {
+        if entry.is_relative() {
             *entry = base.join(&*entry);
         }
     }

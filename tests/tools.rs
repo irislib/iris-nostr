@@ -184,9 +184,14 @@ fn stdin_from_config_keeps_default_graph_policy_even_for_exact_ids() {
     let owner = Keys::generate();
     let stranger = Keys::generate();
     let post = note(&stranger, "excluded");
-    std::fs::write(dir.path().join("graph.json"), "[]").unwrap();
+    std::fs::write(dir.path().join("-"), "[]").unwrap();
     let config = dir.path().join("config.json");
-    std::fs::write(&config,serde_json::json!({"events":["-"],"graph":"graph.json","identity":owner.public_key().to_hex()}).to_string()).unwrap();
+    std::fs::write(
+        &config,
+        serde_json::json!({"events":["-"],"graph":"-","identity":owner.public_key().to_hex()})
+            .to_string(),
+    )
+    .unwrap();
     let out = cli(
         &[
             "--config",
