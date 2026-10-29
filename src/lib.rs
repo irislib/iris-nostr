@@ -3,6 +3,7 @@ pub mod blocks;
 pub mod graph;
 pub mod io;
 mod relay;
+pub mod snapshot;
 
 use anyhow::{Result, ensure};
 use async_trait::async_trait;
@@ -29,6 +30,7 @@ pub struct Sources {
     pub identity: Option<String>,
     pub graph: Option<PathBuf>,
     pub max_distance: Option<u32>,
+    pub no_social_filter: bool,
 }
 
 pub struct Request {
@@ -117,7 +119,7 @@ pub fn parse_root(value: &str) -> Result<Cid> {
     }
 }
 
-pub async fn query(request: Request) -> Result<serde_json::Value> {
+pub async fn query(mut request: Request) -> Result<serde_json::Value> {
     ensure!(
         (1..=10_000).contains(&request.limit),
         "limit must be 1..10000"
@@ -130,6 +132,16 @@ pub async fn query(request: Request) -> Result<serde_json::Value> {
         request.timeout > Duration::ZERO && request.timeout <= Duration::from_secs(300),
         "timeout must be 1..300 seconds"
     );
+    if !request.sources.no_social_filter {
+        request
+            .sources
+            .identity
+            .get_or_insert_with(|| snapshot::DEFAULT_IDENTITY.into());
+        if request.sources.graph.is_none() {
+            request.sources.graph = Some(snapshot::cache_path()?);
+        }
+        request.sources.max_distance.get_or_insert(2);
+    }
     let sources = &request.sources;
     ensure!(
         request.filter.search.is_none() || sources.indexes.is_empty(),
@@ -151,16 +163,45 @@ pub async fn query(request: Request) -> Result<serde_json::Value> {
         "indexes require --blocks or --daemon"
     );
     ensure!(
-        sources.max_distance.is_none() || sources.graph.is_some(),
+        sources.no_social_filter || sources.max_distance.is_none() || sources.graph.is_some(),
         "max-distance requires a graph snapshot"
     );
-    let policy: Arc<dyn PubsubPolicy> = if let Some(path) = &sources.graph {
+    let mut filter = request.filter.clone();
+    let policy: Arc<dyn PubsubPolicy> = if !sources.no_social_filter
+        && let Some(path) = &sources.graph
+    {
         let identity = sources
             .identity
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("graph requires a public identity"))?;
+        let graph = graph::load_graph(identity, path).map_err(|error| anyhow::anyhow!(
+            "cannot load social graph: {error}; run `iris-nostr graph fetch` or explicitly use --no-social-filter"))?;
+        let eligible = graph.users_in_distance_order(sources.max_distance);
+        let authors = eligible
+            .iter()
+            .filter_map(|author| graph::public_key(author).ok())
+            .filter(|author| {
+                filter
+                    .authors
+                    .as_ref()
+                    .is_none_or(|specified| specified.contains(author))
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        // An empty authors filter may be widened by relays. Return without networking.
+        if authors.is_empty() {
+            return Ok(
+                serde_json::json!({"schema_version":1,"events":[],"sources":[],"partial":false,
+                "social_filter":true,"identity":graph.get_root(),"max_distance":sources.max_distance,
+                "coverage":"no authors match the selected graph snapshot"}),
+            );
+        }
+        ensure!(
+            authors.len() <= 20_000,
+            "graph author set exceeds 20000; lower --max-distance or select --author"
+        );
+        filter.authors = Some(authors);
         Arc::new(SocialGraphPolicy::new(
-            Arc::new(RwLock::new(graph::load_graph(identity, path)?)),
+            Arc::new(RwLock::new(graph)),
             SocialGraphPolicyConfig {
                 max_follow_distance: sources.max_distance,
                 outside_graph_action: if sources.max_distance.is_some() {
@@ -240,7 +281,6 @@ pub async fn query(request: Request) -> Result<serde_json::Value> {
             }),
         ));
     }
-    let mut filter = request.filter;
     filter.limit = Some(
         filter
             .limit
@@ -276,6 +316,7 @@ pub async fn query(request: Request) -> Result<serde_json::Value> {
     }).collect::<Vec<_>>();
     Ok(serde_json::json!({
         "schema_version": 1, "events": events, "sources": attempts,
+        "social_filter": !sources.no_social_filter, "max_distance": sources.max_distance,
         "partial": !report.complete,
         "coverage": "bounded; source success does not prove complete Nostr history",
         "fetch_limit_per_source": request.fetch_limit,

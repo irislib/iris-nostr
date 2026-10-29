@@ -1,0 +1,4 @@
+interface:
+  display_name: "Iris Nostr"
+  short_description: "Find Nostr posts with social graph filtering"
+  default_prompt: "Use $iris-nostr to find relevant Nostr posts."

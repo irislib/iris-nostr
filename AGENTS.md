@@ -5,3 +5,8 @@ Do not open another application's live database or invent a second FIPS pool
 when its explicit daemon interface can be used. Offline must perform no network
 I/O, including through a local daemon. Keep library APIs free of CLI types.
 Use locked builds and test with synthetic identities and local fixtures.
+
+Default public graph entry point: Sirius Business Ltd; graph filtering defaults to
+two hops, with explicit --no-social-filter opt-out. Never silently widen a query
+when the graph is missing. Model inference belongs to the calling agent.
+Keep private data out of commits and Cargo/plugin archives. See RELEASING.md.

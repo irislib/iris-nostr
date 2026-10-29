@@ -1,0 +1,20 @@
+{
+  "name": "iris-nostr-plugins",
+  "interface": {
+    "displayName": "Iris Nostr"
+  },
+  "plugins": [
+    {
+      "name": "iris-nostr",
+      "source": {
+        "source": "local",
+        "path": "./plugins/iris-nostr"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

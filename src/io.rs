@@ -2,7 +2,7 @@ use anyhow::{Context, Result, ensure};
 use nostr::Event;
 use std::{fs::File, io::Read, path::Path};
 
-pub const MAX_INPUT: u64 = 32 * 1024 * 1024;
+pub const MAX_INPUT: u64 = 128 * 1024 * 1024;
 
 pub fn read_bounded(path: &Path) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
@@ -10,7 +10,7 @@ pub fn read_bounded(path: &Path) -> Result<Vec<u8>> {
         .context("open input")?
         .take(MAX_INPUT + 1)
         .read_to_end(&mut bytes)?;
-    ensure!(bytes.len() as u64 <= MAX_INPUT, "input exceeds 32 MiB");
+    ensure!(bytes.len() as u64 <= MAX_INPUT, "input exceeds 128 MiB");
     Ok(bytes)
 }
 

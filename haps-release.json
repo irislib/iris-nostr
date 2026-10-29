@@ -1,0 +1,14 @@
+{
+  "catalog": "iris-nostr",
+  "publisher": "npub1xdhnr9mrv47kkrn95k6cwecearydeh8e895990n3acntwvmgk2dsdeeycm",
+  "source": "htree://npub1xdhnr9mrv47kkrn95k6cwecearydeh8e895990n3acntwvmgk2dsdeeycm/iris-nostr",
+  "packages": [
+    {
+      "name": "iris-nostr",
+      "target": "aarch64-apple-darwin",
+      "asset": "iris-nostr-{tag}-aarch64-apple-darwin.tar.gz",
+      "description": "Agent-friendly Nostr discovery with social graph filtering",
+      "commands": {"iris-nostr": "iris-nostr"}
+    }
+  ]
+}

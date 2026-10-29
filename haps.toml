@@ -1,0 +1,12 @@
+[package]
+name = "iris-nostr"
+version = "0.1.0"
+target = "host"
+description = "Agent-friendly Nostr discovery with social graph filtering"
+
+[package.commands]
+iris-nostr = "iris-nostr{exe}"
+
+[build]
+commands = [["cargo", "build", "--release", "--locked", "--bin", "iris-nostr", "--target", "{target}", "-j", "2"]]
+artifacts = { "iris-nostr{exe}" = "target/{target}/release/iris-nostr{exe}" }

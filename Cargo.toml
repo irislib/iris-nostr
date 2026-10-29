@@ -1,11 +1,15 @@
 [package]
-name = "iris-cli"
+name = "iris-nostr"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.99"
 license = "MIT"
 description = "Local-first Nostr event and social graph queries for humans and agents"
 default-run = "iris-nostr"
+repository = "https://github.com/irislib/iris-nostr"
+homepage = "https://github.com/irislib/iris-nostr"
+readme = "README.md"
+include = ["src/**", "Cargo.toml", "Cargo.lock", "/README.md", "/LICENSE", "rust-toolchain.toml"]
 
 [lib]
 name = "iris_nostr"
@@ -30,8 +34,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 
-[dev-dependencies]
 tempfile = "3"
+
+[dev-dependencies]
 hashtree-nostr = "=0.2.90"
 tokio-tungstenite = "0.26"
 futures-util = "0.3"

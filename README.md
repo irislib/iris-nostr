@@ -1,4 +1,4 @@
-# Iris CLI
+# Iris Nostr
 
 Local-first Nostr event and social graph queries for humans and agents.
 
@@ -29,8 +29,28 @@ configured compiler cache. Builds use no application profile or live service.
 Optional install (does not replace Iris Chat):
 
 ```sh
-cargo install --path . --locked
+cargo install iris-nostr --locked
 ```
+
+## Quick start for agents
+
+```sh
+iris-nostr graph fetch
+iris-nostr events query --relay wss://relay.primal.net --relay wss://relay.ditto.pub --kind 1 --limit 100
+```
+
+Queries filter by the social graph **by default**: at most two follow hops from
+Sirius Business Ltd. Override with `--identity`, `--graph`, or `--max-distance`.
+Use `--no-social-filter` to explicitly opt out, including root mutes. Missing
+graph data is an error with setup instructions, never an unfiltered fallback.
+
+The CLI retrieves and filters; the calling agent handles semantic relevance,
+summarization and reasoning. No model runtime, Apple Intelligence, cloud model,
+API key, or particular agent vendor is required. `--contains TEXT` performs a
+case-insensitive match over the returned candidates, not a global text search.
+Use a sufficient `--limit`/`--fetch-limit` for your research question.
+
+[Agent plugin installation](plugins/iris-nostr/README.md).
 
 ## Query events
 
@@ -91,9 +111,25 @@ Graph input is signed kind-3 follow and kind-10000 mute events, or a trusted
 contain graph state, not signatures: use a trusted local export. Distances are
 recomputed relative to the selected identity. Root mutes are excluded; heuristic
 overmute filtering is deliberately off. Unknown graph distance is JSON `null`,
-not zero. `--max-distance` requires an explicit graph and identity. No graph is
-downloaded implicitly. Snapshot freshness and coverage remain the caller's
-responsibility. Graph input is capped at 32 MiB in this first version.
+not zero. The default graph is a public `nostr-social-graph` snapshot captured on
+2026-10-29, distributed as a checksum-pinned release asset. It includes Sirius
+Business Ltd's follows; the smaller Iris Social UI snapshot did not. The default
+entry point is a replaceable local preference, not a follow published in your name.
+
+`graph fetch` downloads and validates it before atomically replacing the cached
+`.bin` file. No query downloads a graph implicitly. Cache location is
+`$XDG_CACHE_HOME/iris-nostr/social-graph.bin` (otherwise the local application
+cache directory). To use an explicitly trusted fresh snapshot instead:
+
+```sh
+iris-nostr graph fetch --url https://graph-api.iris.to/social-graph
+# Optionally pin an expected digest with --sha256 HEX; choose --output FILE.bin.
+```
+
+Custom downloads without a digest explicitly trust the server's binary graph;
+they are not individually signature-verified follow events. Failures preserve
+the previous cache. Snapshot freshness and coverage remain visible caller
+concerns. Inputs are capped at 128 MiB; graph parsing uses the shared library.
 
 ## Hashtree and existing resources
 
@@ -147,7 +183,17 @@ provided repeated flag replaces that configured list. Example:
 ```
 
 Supported fields: `events`, `indexes`, `blocks`, `daemon`, `relays`, `identity`,
-`graph`, `max_distance`. Unknown fields fail rather than being silently ignored.
+`graph`, `max_distance`, `no_social_filter`. Unknown fields fail rather than being silently ignored.
+
+## Distribution and release
+
+Source: [GitHub](https://github.com/irislib/iris-nostr) and
+[Hashtree](https://git.iris.to/#/npub1xdhnr9mrv47kkrn95k6cwecearydeh8e895990n3acntwvmgk2dsdeeycm/iris-nostr).
+The crate installs the `iris-nostr` executable. Prebuilt Haps packaging initially
+targets Apple silicon macOS; Cargo source builds remain available elsewhere.
+Haps keeps its normal audit/trust gates. This project does not assert a
+publisher-binary reproduction or a complete dependency security audit.
+See [RELEASING.md](RELEASING.md) for the locked build and publication gates.
 
 ## Reuse and boundaries
 

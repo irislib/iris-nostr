@@ -14,7 +14,8 @@ fn save(dir: &TempDir, name: &str, events: &[Event]) -> PathBuf {
     std::fs::write(&path, serde_json::to_vec(events).unwrap()).unwrap();
     path
 }
-fn request(sources: Sources) -> Request {
+fn request(mut sources: Sources) -> Request {
+    sources.no_social_filter = sources.graph.is_none();
     Request {
         sources,
         filter: Filter::new().kind(Kind::TextNote),
@@ -111,7 +112,7 @@ async fn rejects_forged_events_and_missing_graph_policy_input() {
         .await
         .unwrap_err()
         .to_string()
-        .contains("graph")
+        .contains("open input")
     );
 }
 
@@ -344,7 +345,14 @@ fn cli_help_and_jsonl_offline_roundtrip() {
     let event = note(&Keys::generate(), 1, "roundtrip");
     let input = save(&dir, "input.json", std::slice::from_ref(&event));
     let output = std::process::Command::new(binary)
-        .args(["events", "query", "--offline", "--jsonl", "--events"])
+        .args([
+            "events",
+            "query",
+            "--offline",
+            "--no-social-filter",
+            "--jsonl",
+            "--events",
+        ])
         .arg(input)
         .output()
         .unwrap();
@@ -409,6 +417,7 @@ fn cli_reports_missing_index_with_partial_exit_code() {
             "events",
             "query",
             "--offline",
+            "--no-social-filter",
             "--index",
             &"ab".repeat(32),
             "--blocks",
@@ -419,4 +428,74 @@ fn cli_reports_missing_index_with_partial_exit_code() {
     assert_eq!(output.status.code(), Some(3));
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["partial"], true);
+}
+
+#[tokio::test]
+async fn default_policy_filters_without_explicit_distance_and_optout_includes_strangers() {
+    let dir = TempDir::new().unwrap();
+    let owner = Keys::generate();
+    let stranger = Keys::generate();
+    let events = save(
+        &dir,
+        "posts.json",
+        &[note(&owner, 1, "owner"), note(&stranger, 2, "stranger")],
+    );
+    let graph = save(&dir, "follows.json", &[]);
+    let sources = Sources {
+        events: vec![events],
+        identity: Some(owner.public_key().to_hex()),
+        graph: Some(graph),
+        ..Default::default()
+    };
+    let report = query(request(sources.clone())).await.unwrap();
+    assert_eq!(report["social_filter"], true);
+    assert_eq!(report["max_distance"], 2);
+    assert_eq!(report["events"].as_array().unwrap().len(), 1);
+    let mut req = request(sources);
+    req.sources.no_social_filter = true;
+    let report = query(req).await.unwrap();
+    assert_eq!(report["events"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn snapshot_digest_and_parser_reject_corruption() {
+    let key = Keys::generate().public_key().to_hex();
+    let graph = nostr_social_graph::SocialGraph::new(&key);
+    let bytes = graph.to_binary().unwrap();
+    let hash = hashtree_core::to_hex(&hashtree_core::sha256(&bytes));
+    assert!(iris_nostr::snapshot::validate(&bytes, Some(&hash), &key).is_ok());
+    assert!(iris_nostr::snapshot::validate(&bytes, Some(&"00".repeat(32)), &key).is_err());
+    assert!(iris_nostr::snapshot::validate(b"not a graph", None, &key).is_err());
+}
+
+#[tokio::test]
+async fn failed_snapshot_download_preserves_existing_file() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("graph.bin");
+    std::fs::write(&path, b"previous").unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buffer = [0; 4096];
+        let count = socket.read(&mut buffer).await.unwrap();
+        assert!(count > 0);
+        socket
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nbad")
+            .await
+            .unwrap();
+    });
+    assert!(
+        iris_nostr::snapshot::fetch(
+            Some(&url),
+            Some(&"00".repeat(32)),
+            &path,
+            iris_nostr::snapshot::DEFAULT_IDENTITY
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(std::fs::read(path).unwrap(), b"previous");
+    server.await.unwrap();
 }

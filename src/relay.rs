@@ -27,6 +27,15 @@ impl EventBus for RelaySource {
         // Shared transport handles reconnection and verification. The CLI owns
         // bounded-query semantics: a timeout/disconnect is never an empty success.
         let mut session = RelaySession::connect(&self.url).await?;
+        while !session.is_connected() {
+            match session.next().await? {
+                Some(RelaySessionEvent::Connection(true)) => break,
+                Some(RelaySessionEvent::Connection(false)) | None => {
+                    return Err(PubsubError::Storage("relay connection failed".into()));
+                }
+                _ => {}
+            }
+        }
         let subscription = SubscriptionId::generate();
         session
             .send(ClientMessage::req(subscription.clone(), filters.clone()))

@@ -1,0 +1,13 @@
+{
+  "name": "iris-nostr-plugins",
+  "owner": {
+    "name": "Sirius Business Ltd"
+  },
+  "plugins": [
+    {
+      "name": "iris-nostr",
+      "source": "./plugins/iris-nostr",
+      "description": "Find public Nostr posts using social graph filters, Hashtree indexes and relays."
+    }
+  ]
+}

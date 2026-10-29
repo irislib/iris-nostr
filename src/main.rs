@@ -1,6 +1,6 @@
 use anyhow::{Result, ensure};
 use clap::{Args, Parser, Subcommand};
-use iris_nostr::{Request, Sources, graph, io, query};
+use iris_nostr::{Request, Sources, graph, io, query, snapshot};
 use nostr::{Filter, Kind, nips::nip19::ToBech32};
 use std::{io::Write, path::PathBuf, time::Duration};
 
@@ -38,6 +38,17 @@ enum Events {
 }
 #[derive(Subcommand)]
 enum Graph {
+    /// Download and validate a graph snapshot for offline queries.
+    Fetch {
+        #[arg(long)]
+        url: Option<String>,
+        #[arg(long)]
+        sha256: Option<String>,
+        #[arg(long)]
+        output: Option<PathBuf>,
+        #[arg(long)]
+        identity: Option<String>,
+    },
     Distance {
         pubkey: String,
         #[arg(long)]
@@ -66,6 +77,12 @@ struct Query {
     graph: Option<PathBuf>,
     #[arg(long)]
     max_distance: Option<u32>,
+    /// Opt out of the default social graph filter (including mutes).
+    #[arg(long)]
+    no_social_filter: bool,
+    /// Case-insensitive text match within fetched candidates (not global search).
+    #[arg(long)]
+    contains: Option<String>,
     /// Ordinary Nostr filter JSON; the fetch budget caps its limit.
     #[arg(long, default_value = "{}")]
     filter: String,
@@ -119,6 +136,26 @@ async fn run(cli: Cli) -> Result<i32> {
         }
         Command::Graph {
             command:
+                Graph::Fetch {
+                    url,
+                    sha256,
+                    output,
+                    identity,
+                },
+        } => {
+            let path = output
+                .or(sources.graph)
+                .map(Ok)
+                .unwrap_or_else(snapshot::cache_path)?;
+            let identity = identity
+                .or(sources.identity)
+                .unwrap_or_else(|| snapshot::DEFAULT_IDENTITY.into());
+            let result =
+                snapshot::fetch(url.as_deref(), sha256.as_deref(), &path, &identity).await?;
+            println!("{result}");
+        }
+        Command::Graph {
+            command:
                 Graph::Distance {
                     pubkey,
                     identity,
@@ -127,10 +164,11 @@ async fn run(cli: Cli) -> Result<i32> {
         } => {
             let identity = identity
                 .or(sources.identity)
-                .ok_or_else(|| anyhow::anyhow!("identity is required"))?;
+                .unwrap_or_else(|| snapshot::DEFAULT_IDENTITY.into());
             let path = path
                 .or(sources.graph)
-                .ok_or_else(|| anyhow::anyhow!("graph snapshot is required"))?;
+                .map(Ok)
+                .unwrap_or_else(snapshot::cache_path)?;
             let graph = graph::load_graph(&identity, &path)?;
             let pubkey = graph::public_key(&pubkey)?.to_hex();
             let distance = graph.get_follow_distance(&pubkey);
@@ -157,6 +195,7 @@ async fn run(cli: Cli) -> Result<i32> {
             sources.identity = args.identity.or(sources.identity);
             sources.graph = args.graph.or(sources.graph);
             sources.max_distance = args.max_distance.or(sources.max_distance);
+            sources.no_social_filter |= args.no_social_filter;
             let mut filter: Filter = serde_json::from_str(&args.filter)?;
             ensure!(
                 filter.search.is_none() || sources.indexes.is_empty(),
@@ -177,6 +216,18 @@ async fn run(cli: Cli) -> Result<i32> {
                 offline: args.offline,
             })
             .await?;
+            if let Some(text) = args.contains {
+                let needle = text.to_lowercase();
+                result["events"].as_array_mut().unwrap().retain(|row| {
+                    row["event"]["content"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(&needle)
+                });
+                result["text_filter"] =
+                    serde_json::json!({"contains": text, "scope": "returned candidates only"});
+            }
             let partial = result["partial"] == true;
             let stdout = std::io::stdout();
             let mut output = stdout.lock();
