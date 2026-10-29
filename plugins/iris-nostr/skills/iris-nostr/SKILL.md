@@ -1,6 +1,6 @@
 ---
 name: iris-nostr
-description: Retrieve and inspect public Nostr posts using local event files, Hashtree indexes, relays and social-graph filtering. Use for Nostr research and discovery, not encrypted messaging, payments or market transactions.
+description: Query public Nostr events and discover tags using relays, Hashtree caches and social-graph filtering; explicitly sign and publish authorized events with existing identities. Use for Nostr research or general posts, not encrypted messaging, payments or market transactions.
 ---
 
 # Iris Nostr
@@ -62,3 +62,18 @@ semantic ranking; no model provider is required. Do not send cached/local data
 to a new model provider without authorization. Keep secrets, snapshots and
 query history out of commits. Messaging belongs to Iris Chat's `iris`; market
 operations belong to Iris Market. Read-only discovery authorizes neither.
+
+For explicitly authorized general posts, `identities` lists public aliases from
+the existing Hashtree key file. `events sign --signer ALIAS_OR_NPUB --unsigned FILE`
+signs offline; `--keys-file` selects another existing file. Never choose a signer
+from the discovery root, pass a secret as an argument, or open Chat's database.
+The signer must match the user's intended account. A linked device is not an
+owner signer. Use another app's supported signer if it owns the key.
+
+`events publish --events FILE --dry-run` validates without networking; omit
+`--dry-run` only for authorized publication. It accepts signed JSON/JSONL and
+waits for matching relay OKs. Inspect per-event `accepted_by` and per-relay
+acceptance, rejection or timeout; queueing is not publication. Exit 0 means all
+selected relays accepted all events, 3 means some acceptance but an incomplete
+result, and 1 means no acceptance or validation failure. Retry the same signed
+event when uncertain; do not silently create a new timestamped post.

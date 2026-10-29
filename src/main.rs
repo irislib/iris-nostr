@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, ensure};
 use clap::{Args, Parser, Subcommand};
 use iris_nostr::{
-    DEFAULT_MAX_DISTANCE, DEFAULT_RELAYS, Request, Sources, cache, discovery, graph, io, query,
-    query_with_events, reference, snapshot,
+    DEFAULT_MAX_DISTANCE, DEFAULT_RELAYS, Request, Sources, cache, discovery, graph, io,
+    publishing, query, query_with_events, reference, signing, snapshot,
 };
 use nostr::{Filter, Kind, nips::nip19::ToBech32};
 use std::{io::Write, path::PathBuf, time::Duration};
@@ -34,7 +34,7 @@ enum Command {
         #[command(subcommand)]
         command: Profiles,
     },
-    /// Read signed events. JSON report by default; no publishing or signing.
+    /// Query, verify, explicitly sign or publish Nostr events.
     Events {
         #[command(subcommand)]
         command: Events,
@@ -46,6 +46,12 @@ enum Command {
     },
     /// Normalize a public identity; never reads private keys or app databases.
     Identity { pubkey: String },
+    /// List public identities from the existing Hashtree key file. Never creates keys.
+    Identities {
+        /// Existing Hashtree-format file; defaults to Hashtree's configured keys path.
+        #[arg(long)]
+        keys_file: Option<PathBuf>,
+    },
     /// Decode a public NIP-19 reference or nostr: URI. Never follows relay hints.
     Decode { reference: String },
 }
@@ -58,6 +64,33 @@ enum Cache {
 }
 #[derive(Subcommand)]
 enum Events {
+    /// Sign one unsigned event offline with an explicitly selected existing identity.
+    Sign {
+        /// Draft JSON file, or - for stdin.
+        #[arg(long, default_value = "-")]
+        unsigned: PathBuf,
+        /// Exact Hashtree alias or public key. Never a secret key or implicit graph root.
+        #[arg(long)]
+        signer: String,
+        /// Existing Hashtree-format file; defaults to Hashtree's configured keys path.
+        #[arg(long)]
+        keys_file: Option<PathBuf>,
+    },
+    /// Publish already-signed events and wait for matching relay acknowledgements.
+    Publish {
+        /// Signed JSON/JSONL file, or - for stdin. All events are verified first.
+        #[arg(long, default_value = "-")]
+        events: PathBuf,
+        /// Replace configured/default public relays. No relay hints are followed.
+        #[arg(long = "relay")]
+        relays: Vec<String>,
+        /// Deadline per relay, in seconds.
+        #[arg(long, default_value_t = 10)]
+        timeout: u64,
+        /// Validate events and destinations without any networking.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Find signed events with graph and optional text filters.
     Query(Box<Query>),
     /// Discover t tags ranked by distinct authors in a bounded event sample.
@@ -255,6 +288,63 @@ fn apply_relay_defaults(sources: &mut Sources, offline: bool) {
 async fn run(cli: Cli) -> Result<i32> {
     let mut sources = load_config(cli.config)?;
     match cli.command {
+        Command::Identities { keys_file } => {
+            let path = keys_file.unwrap_or_else(hashtree_config::get_keys_path);
+            println!(
+                "{}",
+                serde_json::json!({"identities":signing::identities(&path)?})
+            );
+        }
+        Command::Events {
+            command:
+                Events::Sign {
+                    unsigned,
+                    signer,
+                    keys_file,
+                },
+        } => {
+            let draft = if unsigned == std::path::Path::new("-") {
+                signing::read_draft(std::io::stdin().lock())?
+            } else {
+                signing::read_draft(std::fs::File::open(unsigned).context("open unsigned event")?)?
+            };
+            let path = keys_file.unwrap_or_else(hashtree_config::get_keys_path);
+            let event = signing::sign_from_store(draft, &path, &signer)?;
+            println!("{}", serde_json::to_string(&event)?);
+        }
+        Command::Events {
+            command:
+                Events::Publish {
+                    events,
+                    relays,
+                    timeout,
+                    dry_run,
+                },
+        } => {
+            let events = if events == std::path::Path::new("-") {
+                io::read_events_from(std::io::stdin().lock())?
+            } else {
+                io::read_events(&events)?
+            };
+            let relays = if !relays.is_empty() {
+                relays
+            } else if !sources.relays.is_empty() {
+                sources.relays
+            } else {
+                DEFAULT_RELAYS.iter().map(|url| (*url).into()).collect()
+            };
+            let report =
+                publishing::publish(events, relays, Duration::from_secs(timeout), dry_run).await?;
+            let code = if dry_run || report["partial"] == false {
+                0
+            } else if report["published_event_count"] == 0 {
+                1
+            } else {
+                3
+            };
+            println!("{report}");
+            return Ok(code);
+        }
         Command::Config => {
             println!(
                 "{}",

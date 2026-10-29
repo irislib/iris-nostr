@@ -8,7 +8,9 @@ Messaging and market operations are outside this package.
    explicit Cargo package include list. `.gitignore` is not a secret scanner.
 2. Run `cargo fmt --check`, `cargo clippy --locked --all-targets -- -D warnings`,
    `cargo test --locked`, and `cargo package --locked`. Review the packaged file
-   list. Preserve complete logs locally outside tracked source.
+   list. Preserve complete logs locally outside tracked source. Exercise signing
+   with synthetic keys and publishing with local relays, including rejected or
+   missing acknowledgements and whole-batch validation before any networking.
 3. Test a live graph-filtered query and an offline replay. Public graph data
    used for the default download must match the digest in `src/snapshot.rs`.
    Use the versioned public snapshot maintained by nostr-social-graph and verify

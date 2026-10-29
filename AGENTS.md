@@ -1,6 +1,8 @@
 Keep this repository separate from Iris Chat. The executable is iris-nostr;
-iris is already owned by Iris Chat. Messaging, signing keys and ratchet state
-remain owned by Iris Chat. Use shared nostr-pubsub, Hashtree and graph libraries.
+iris is already owned by Iris Chat. Messaging, linked-device authorization and ratchet state
+remain owned by Iris Chat. General event signing uses an explicitly selected
+existing Hashtree-format identity; never select a signer from the discovery root
+or create/copy keys. Keep secrets out of command arguments and output. Use shared nostr-pubsub, Hashtree and graph libraries.
 Do not open another application's live database or invent a second FIPS pool
 when its explicit daemon interface can be used. Offline must perform no network
 I/O, including through a local daemon. Keep library APIs free of CLI types.
@@ -28,3 +30,7 @@ plugin skill concise. CLI relay defaults apply only without selected sources;
 never add networking to a local or offline read. Preserve explicit Nostr
 filters when enforcing large graphs locally. Count tag popularity by distinct
 full public keys over verified samples, not raw post volume or key prefixes.
+
+Publishing requires matching relay OK evidence; queueing is not delivery.
+Validate the whole batch before networking. Use synthetic identities and local
+relays for write tests; a discovery request never authorizes a public post.

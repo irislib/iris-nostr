@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "iris-nostr",
-  "version": "0.3.0",
-  "description": "Find public Nostr posts using social graph filters, Hashtree indexes and relays.",
+  "version": "0.4.0",
+  "description": "Query, sign and publish Nostr events using existing identities, graph filters and caches.",
   "author": {
     "name": "Sirius Business Ltd"
   },

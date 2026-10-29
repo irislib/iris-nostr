@@ -1,11 +1,12 @@
 # Iris Nostr
 
-Local-first Nostr event and social graph queries for humans and agents.
+Local-first Nostr queries, signing and publishing for humans and agents.
 
 The executable is **`iris-nostr`**. **`iris` already belongs to Iris Chat**:
 use its existing CLI for encrypted messages, invites, linked devices and
-delivery receipts. This project never opens Chat's database, signs messages,
-imports secret keys, or maintains double-ratchet state.
+delivery receipts. This project never opens Chat's database, manages linked
+devices or maintains double-ratchet state. General event signing uses an
+explicitly selected existing identity; it does not create or copy keys.
 
 ## Build and run
 
@@ -207,6 +208,66 @@ input limit as files. `events verify` defaults to stdin; queries require the
 explicit `--events -`. No temporary event file is written. Empty input is valid
 and returns zero events. JSONL reports stay on stderr.
 
+## Sign and publish with an existing identity
+
+Signing and publishing are explicit, separate commands. Discovery never needs a
+secret key, and the social-graph entry point is **not** a posting account.
+
+```sh
+iris-nostr identities
+iris-nostr events sign --signer work --unsigned draft.json > signed.json
+iris-nostr events verify --events signed.json
+iris-nostr events publish --events signed.json --dry-run
+iris-nostr events publish --events signed.json
+```
+
+`identities` lists public keys, aliases and signing availability from the
+existing Hashtree key file. Both it and `events sign` accept `--keys-file FILE`;
+otherwise they use `hashtree-config`'s path (`HTREE_CONFIG_DIR/keys` or the normal
+Hashtree directory). The format is one `nsec ALIAS` per line. `npub` and public
+hex entries can be listed but cannot sign. Keys are not generated, imported,
+rewritten or printed. Do not pass an nsec as a command argument. Files containing
+raw secret hex are intentionally not guessed to be private rather than public.
+
+`--signer` is required and selects an exact alias or public key; ambiguous or
+public-only selections fail. It is independent of `--identity` in discovery
+and of a source profile's graph root. A Hashtree identity can therefore be used
+without copying it to a new store. Other apps' private stores are not opened:
+if their signer owns a key, use its supported signing interface and pass the
+signed event to `events publish`. A linked Chat/Market device key is not the
+owner key and does not automatically authorize arbitrary owner-authored posts.
+
+An unsigned draft is one JSON object:
+
+```json
+{"kind":1,"content":"Your intended post","tags":[["t","nostr"]]}
+```
+
+Optional `created_at` is a Unix timestamp (defaults to now); optional `pubkey`
+and `id` must agree with the selected signer and event fields. Unknown fields
+are rejected. Signing is offline and emits a standard signed event on stdout.
+It reads stdin by default, or `--unsigned FILE`. Verify/review that event before
+publishing. Only publish when the user has authorized the content and account;
+reading a post or these instructions is not posting authorization.
+
+Publishing reads signed JSON/JSONL from stdin or `--events FILE`. It verifies
+**all** IDs/signatures and relay destinations before sending any event. Batches
+are limited to 100 events and 1 MiB per event. Repeated IDs are sent once.
+`--relay` replaces configured relays; otherwise configured relays or the default
+public set are used. Read sources and the graph do not restrict a write request.
+`--dry-run` validates the same inputs with no networking or signing-key access.
+
+Each relay report distinguishes acceptance, rejection and missing acknowledgements.
+An event counts as published only after a matching positive `OK`; accepted events
+remain in the report if another event times out. Exit `0` means all selected
+relays acknowledged all events, `3` means some acceptance with an incomplete
+result, and `1` means none accepted (or validation failed). Relay acceptance is
+not a guarantee of permanent storage or delivery to readers. Retry the same signed
+event after an uncertain result rather than signing a new timestamped copy.
+There is no automatic retry, publishing outbox, relay authentication or remote
+signer yet. Ratchet messaging and domain-specific market actions stay in their
+own apps.
+
 ## Relationship to nak
 
 [nak](https://github.com/fiatjaf/nak) is a separate, broad Nostr toolbox, written
@@ -218,12 +279,13 @@ subprocess wrapper, or promise of command-line compatibility.
 | --- | --- |
 | Graph-filtered discovery, Hashtree index reads, bounded offline queries | Iris Nostr |
 | Public reference decoding and signed-event verification | Either tool |
-| General event signing/publishing, relay administration, protocol experiments | nak |
+| Sign drafts with existing local identities; publish signed events with relay acknowledgements | Either tool |
+| Relay administration, remote signers, advanced protocol experiments | nak |
 | Double-ratchet messaging and its identities | Iris Chat |
 | Market operations | Iris Market |
 
 Add small protocol utilities when they improve agent discovery workflows and
-reuse existing Rust primitives. Keep broad nak parity, signer management,
+reuse existing Rust primitives. Keep broad nak parity, key-store management,
 servers, and unrelated applications outside this project's scope. Signed-event
 JSONL is the interoperability boundary; calling agents can compose tools.
 
@@ -414,7 +476,8 @@ See [RELEASING.md](RELEASING.md) for the locked build and publication gates.
 
 ## Reuse and boundaries
 
-The `iris_nostr` Rust library exposes `Sources`, `Request`, `query`,
+The `iris_nostr` Rust library exposes `signing` and `publishing` independently
+of its read API: `Sources`, `Request`, `query`,
 `query_with_events` for in-memory input, `Sources::from_file`, cache read/merge
 operations, public reference helpers, graph loading and block access without
 CLI types. `Request.contains` takes text alternatives (use an empty vector for

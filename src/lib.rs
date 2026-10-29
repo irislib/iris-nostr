@@ -1,11 +1,13 @@
-//! Model-independent read API. No signing keys, UI types, or messaging state.
+//! Model-independent Nostr queries and explicit signing/publishing operations.
 pub mod blocks;
 pub mod cache;
 pub mod discovery;
 pub mod graph;
 pub mod io;
+pub mod publishing;
 pub mod reference;
 mod relay;
+pub mod signing;
 pub mod snapshot;
 
 use anyhow::{Result, ensure};

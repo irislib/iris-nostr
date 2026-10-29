@@ -1,10 +1,10 @@
 [package]
 name = "iris-nostr"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.99"
 license = "MIT"
-description = "Local-first Nostr event and social graph queries for humans and agents"
+description = "Local-first Nostr queries, signing and publishing for humans and agents"
 default-run = "iris-nostr"
 repository = "https://github.com/irislib/iris-nostr"
 homepage = "https://github.com/irislib/iris-nostr"
@@ -23,6 +23,7 @@ anyhow = "1"
 async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }
 hashtree-core = "=0.2.91"
+hashtree-config = "=0.2.83"
 hashtree-fs = "=0.2.83"
 hashtree-nostr = "=0.2.90"
 hashtree-nostr-pubsub = "=0.2.87"
@@ -35,6 +36,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+zeroize = "=1.9.1"
 
 tempfile = "3"
 

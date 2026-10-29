@@ -1,6 +1,6 @@
 [package]
 name = "iris-nostr"
-version = "0.3.0"
+version = "0.4.0"
 target = "host"
 description = "Agent-friendly Nostr discovery with social graph filtering"
 
