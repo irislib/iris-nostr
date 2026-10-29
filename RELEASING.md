@@ -36,3 +36,9 @@ Messaging and market operations are outside this package.
 
 No release command should add credentials, machine paths, cached research or
 private operational metadata to the Git tree or public release assets.
+
+For isolated Haps builds, put the dedicated build home outside the login-home
+directory (for example a private temporary directory). Cargo walks parent
+directories for configuration; a checkout beneath the login home may try to read
+private host Cargo configuration, which isolation correctly denies. Keep signer
+material outside source and staged packages. Do not switch to a host build.

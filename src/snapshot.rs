@@ -68,9 +68,29 @@ pub async fn fetch(
             && url.password().is_none(),
         "use HTTPS or loopback HTTP without credentials"
     );
+    // GitHub release downloads redirect to their asset host. Keep custom snapshot
+    // endpoints redirect-free and restrict this exception to the pinned default.
+    let redirects = if url.as_str() == DEFAULT_URL {
+        reqwest::redirect::Policy::custom(|attempt| {
+            let target = attempt.url();
+            if attempt.previous().len() <= 3
+                && target.scheme() == "https"
+                && target.host_str() == Some("release-assets.githubusercontent.com")
+                && target.username().is_empty()
+                && target.password().is_none()
+            {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        })
+    } else {
+        reqwest::redirect::Policy::none()
+    };
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(60))
-        .redirect(reqwest::redirect::Policy::none())
+        .redirect(redirects)
+        .no_proxy()
         .build()?;
     let mut response = client.get(url.clone()).send().await?.error_for_status()?;
     ensure!(
