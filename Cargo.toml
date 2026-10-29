@@ -9,7 +9,7 @@ default-run = "iris-nostr"
 repository = "https://github.com/irislib/iris-nostr"
 homepage = "https://github.com/irislib/iris-nostr"
 readme = "README.md"
-include = ["src/**", "Cargo.toml", "Cargo.lock", "/README.md", "/LICENSE", "rust-toolchain.toml"]
+include = ["src/**", "tests/**", "Cargo.toml", "Cargo.lock", "/README.md", "/LICENSE", "rust-toolchain.toml"]
 
 [lib]
 name = "iris_nostr"
