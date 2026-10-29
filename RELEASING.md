@@ -42,3 +42,7 @@ directory (for example a private temporary directory). Cargo walks parent
 directories for configuration; a checkout beneath the login home may try to read
 private host Cargo configuration, which isolation correctly denies. Keep signer
 material outside source and staged packages. Do not switch to a host build.
+
+The release recipe uses `scripts/build-release.sh` to remap checkout and Cargo
+registry paths in distributed executables. Do not substitute a different binary
+after verification; archive and publish the exact isolated-build payload.
