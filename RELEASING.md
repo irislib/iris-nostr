@@ -11,8 +11,9 @@ Messaging and market operations are outside this package.
    list. Preserve complete logs locally outside tracked source.
 3. Test a live graph-filtered query and an offline replay. Public graph data
    used for the default download must match the digest in `src/snapshot.rs`.
-   Publish that explicitly selected public snapshot as `social-graph.bin` on
-   the versioned GitHub release; never package a private user graph.
+   Use the versioned public snapshot maintained by nostr-social-graph and verify
+   its published bytes against that pin. Preserve its provenance; never publish
+   a private user graph or silently replace an older release asset.
 4. Commit and tag the exact release source. Push GitHub and Hashtree. For
    Hashtree use a qualified `git-remote-htree` and verify full source history in
    an empty-store public clone before publishing binaries.

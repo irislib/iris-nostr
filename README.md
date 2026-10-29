@@ -170,10 +170,13 @@ Graph input is signed kind-3 follow and kind-10000 mute events, or a trusted
 contain graph state, not signatures: use a trusted local export. Distances are
 recomputed relative to the selected identity. Root mutes are excluded; heuristic
 overmute filtering is deliberately off. Unknown graph distance is JSON `null`,
-not zero. The default graph is a public `nostr-social-graph` snapshot captured on
-2026-10-29, distributed as a checksum-pinned release asset. It includes Sirius
-Business Ltd's follows; the smaller Iris Social UI snapshot did not. The default
-entry point is a replaceable local preference, not a follow published in your name.
+not zero. The default is the shared [nostr-social-graph bootstrap](https://github.com/mmalmi/nostr-social-graph/releases/tag/v3.0.1),
+captured on 2026-10-29 and pinned by checksum. It normalizes duplicate identity
+mappings before retaining complete lists for owners through two company-root
+hops, including third-hop targets. The 1.56 MB snapshot covers 411 identities
+within two hops. For another identity, supply a snapshot or signed lists that
+cover its network. The entry point is a replaceable local preference, not a
+follow published in your name.
 
 `graph fetch` downloads and validates it before atomically replacing the cached
 `.bin` file. No query downloads a graph implicitly. Cache location is

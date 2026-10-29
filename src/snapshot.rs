@@ -8,11 +8,12 @@ use std::{
 
 pub const DEFAULT_IDENTITY: &str =
     "npub1xdhnr9mrv47kkrn95k6cwecearydeh8e895990n3acntwvmgk2dsdeeycm";
-// Public nostr-social-graph server snapshot, captured 2026-10-29. A changed server response
-// cannot silently change the default trust graph. Updating this pin is a release.
+// Canonical company-root bootstrap, captured 2026-10-29 and maintained by
+// nostr-social-graph. Numeric aliases are normalized before projection.
+// Updating this checksum pin is a release.
 pub const DEFAULT_URL: &str =
-    "https://github.com/irislib/iris-nostr/releases/download/v0.1.0/social-graph.bin";
-pub const DEFAULT_SHA256: &str = "dcb5b683d3a8bc7482a22468840257187ac2510362075669a756686ea94f90b7";
+    "https://github.com/mmalmi/nostr-social-graph/releases/download/v3.0.1/socialGraph.bin";
+pub const DEFAULT_SHA256: &str = "df349a23122993183b9b9d2d056b7c655a984bdc86bc72f747202ad772de4d8f";
 
 pub fn cache_path() -> Result<PathBuf> {
     let base = std::env::var_os("XDG_CACHE_HOME")
