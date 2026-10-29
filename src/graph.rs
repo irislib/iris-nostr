@@ -4,7 +4,7 @@ use nostr_social_graph::{NostrEvent, SocialGraph};
 use std::path::Path;
 
 pub fn public_key(value: &str) -> Result<PublicKey> {
-    PublicKey::parse(value).map_err(|_| anyhow::anyhow!("expected a public hex key or npub"))
+    crate::reference::public_key(value)
 }
 
 pub fn load_graph(identity: &str, path: &Path) -> Result<SocialGraph> {

@@ -1,6 +1,6 @@
 use anyhow::{Result, ensure};
 use clap::{Args, Parser, Subcommand};
-use iris_nostr::{Request, Sources, graph, io, query, snapshot};
+use iris_nostr::{Request, Sources, graph, io, query, query_with_events, reference, snapshot};
 use nostr::{Filter, Kind, nips::nip19::ToBech32};
 use std::{io::Write, path::PathBuf, time::Duration};
 
@@ -31,10 +31,21 @@ enum Command {
     },
     /// Normalize a public identity; never reads private keys or app databases.
     Identity { pubkey: String },
+    /// Decode a public NIP-19 reference or nostr: URI. Never follows relay hints.
+    Decode { reference: String },
 }
 #[derive(Subcommand)]
 enum Events {
     Query(Box<Query>),
+    /// Check event IDs and signatures offline. No graph or network needed.
+    Verify {
+        /// Signed JSON or JSONL file; use - for stdin (the default).
+        #[arg(long, default_value = "-")]
+        events: PathBuf,
+        /// Output verified events as JSONL, with the verification report on stderr.
+        #[arg(long)]
+        jsonl: bool,
+    },
 }
 #[derive(Subcommand)]
 enum Graph {
@@ -59,6 +70,7 @@ enum Graph {
 }
 #[derive(Args)]
 struct Query {
+    /// Signed JSON or JSONL file. Use - once to read stdin.
     #[arg(long = "events")]
     events: Vec<PathBuf>,
     #[arg(long = "index")]
@@ -90,6 +102,10 @@ struct Query {
     kind: Vec<u16>,
     #[arg(long)]
     author: Vec<String>,
+    /// Exact event ID as hex, note or nevent (also nostr: URIs). Repeat to match any.
+    /// Relay hints are not followed; select sources explicitly.
+    #[arg(long)]
+    id: Vec<String>,
     #[arg(long, default_value_t = 50)]
     limit: usize,
     #[arg(long, default_value_t = 1000)]
@@ -117,7 +133,7 @@ fn load_config(path: Option<PathBuf>) -> Result<Sources> {
         .chain(config.blocks.iter_mut())
         .chain(config.graph.iter_mut())
     {
-        if entry.is_relative() {
+        if entry.is_relative() && entry != std::path::Path::new("-") {
             *entry = base.join(&*entry);
         }
     }
@@ -127,6 +143,29 @@ fn load_config(path: Option<PathBuf>) -> Result<Sources> {
 async fn run(cli: Cli) -> Result<i32> {
     let mut sources = load_config(cli.config)?;
     match cli.command {
+        Command::Decode { reference } => {
+            println!("{}", reference::decode(&reference)?);
+        }
+        Command::Events {
+            command: Events::Verify { events, jsonl },
+        } => {
+            let events = if events == std::path::Path::new("-") {
+                io::read_events_from(std::io::stdin().lock())?
+            } else {
+                io::read_events(&events)?
+            };
+            let report = serde_json::json!({"schema_version":1, "valid":true, "event_count":events.len(), "checks":["event_id", "signature"]});
+            if jsonl {
+                let stdout = std::io::stdout();
+                let mut output = stdout.lock();
+                for event in events {
+                    writeln!(output, "{}", serde_json::to_string(&event)?)?;
+                }
+                eprintln!("{report}");
+            } else {
+                println!("{report}");
+            }
+        }
         Command::Identity { pubkey } => {
             let key = graph::public_key(&pubkey)?;
             println!(
@@ -207,15 +246,32 @@ async fn run(cli: Cli) -> Result<i32> {
             for author in args.author {
                 filter = filter.author(graph::public_key(&author)?);
             }
-            let mut result = query(Request {
+            for id in args.id {
+                filter = filter.id(reference::event_id(&id)?);
+            }
+            let stdin_count = sources
+                .events
+                .iter()
+                .filter(|path| *path == std::path::Path::new("-"))
+                .count();
+            ensure!(stdin_count <= 1, "stdin may be selected only once");
+            sources
+                .events
+                .retain(|path| path != std::path::Path::new("-"));
+            let request = Request {
                 sources,
                 filter,
                 limit: args.limit,
                 fetch_limit: args.fetch_limit,
                 timeout: Duration::from_secs(args.timeout),
                 offline: args.offline,
-            })
-            .await?;
+            };
+            let mut result = if stdin_count == 1 {
+                let events = io::read_events_from(std::io::stdin().lock())?;
+                query_with_events(request, events).await?
+            } else {
+                query(request).await?
+            };
             if let Some(text) = args.contains {
                 let needle = text.to_lowercase();
                 result["events"].as_array_mut().unwrap().retain(|row| {

@@ -9,5 +9,8 @@
       "source": "./plugins/iris-nostr",
       "description": "Find public Nostr posts using social graph filters, Hashtree indexes and relays."
     }
-  ]
+  ],
+  "metadata": {
+    "description": "Nostr discovery and offline inspection tools for agents."
+  }
 }

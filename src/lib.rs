@@ -2,6 +2,7 @@
 pub mod blocks;
 pub mod graph;
 pub mod io;
+pub mod reference;
 mod relay;
 pub mod snapshot;
 
@@ -119,7 +120,27 @@ pub fn parse_root(value: &str) -> Result<Cid> {
     }
 }
 
-pub async fn query(mut request: Request) -> Result<serde_json::Value> {
+pub async fn query(request: Request) -> Result<serde_json::Value> {
+    query_inner(request, None).await
+}
+
+/// Add caller-supplied events as an in-memory source. No temporary event files.
+/// Verifies every event, including when graph policy would exclude its author.
+pub async fn query_with_events(
+    request: Request,
+    events: Vec<nostr::Event>,
+) -> Result<serde_json::Value> {
+    let events = events
+        .into_iter()
+        .map(VerifiedEvent::try_from)
+        .collect::<nostr_pubsub::Result<Vec<_>>>()?;
+    query_inner(request, Some(events)).await
+}
+
+async fn query_inner(
+    mut request: Request,
+    input: Option<Vec<VerifiedEvent>>,
+) -> Result<serde_json::Value> {
     ensure!(
         (1..=10_000).contains(&request.limit),
         "limit must be 1..10000"
@@ -153,6 +174,7 @@ pub async fn query(mut request: Request) -> Result<serde_json::Value> {
     );
     ensure!(
         !sources.events.is_empty()
+            || input.is_some()
             || !sources.indexes.is_empty()
             || !sources.relays.is_empty()
             || sources.daemon.is_some(),
@@ -226,6 +248,14 @@ pub async fn query(mut request: Request) -> Result<serde_json::Value> {
         .map(blocks::daemon_url)
         .transpose()?;
     let mut buses: Vec<(SourceRoute, Arc<dyn EventBus>)> = Vec::new();
+    if let Some(events) = input {
+        let id = "input";
+        let bus = Arc::new(InMemoryEventBus::new());
+        for event in events {
+            bus.publish(event, EventSource::local_index(id)).await?;
+        }
+        buses.push((SourceRoute::local_index(id).with_dataset(id)?, bus));
+    }
     for (i, path) in sources.events.iter().enumerate() {
         let id = format!("file-{i}");
         let bus = Arc::new(InMemoryEventBus::new());

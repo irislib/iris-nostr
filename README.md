@@ -92,6 +92,65 @@ does not silently ignore configured network sources. Use a local-only config
 when switching offline. Local source preparation failures reject the request;
 failures during routed reads are reported per source.
 
+## Event filters, references and pipelines
+
+`--filter` accepts a standard Nostr filter object, including `ids`, `authors`,
+`kinds`, `since`, `until`, and tag filters such as `"#t"` or `"#e"`. These narrow
+the query together with the default graph policy. Repeat `--id`, `--author`, or
+`--kind` to add alternatives within that field. The fetch budget caps `limit`.
+
+```sh
+iris-nostr events query --relay wss://relay.primal.net \
+  --filter '{"kinds":[1],"#t":["nostr"],"since":1793232000}'
+iris-nostr events query --relay wss://relay.primal.net --id "$NOTE_OR_NEVENT"
+iris-nostr decode "$PUBLIC_NOSTR_REFERENCE"
+```
+
+`decode` supports `npub`, `nprofile`, `note`, `nevent`, and `naddr`, also with the
+`nostr:` URI prefix. It reports relay hints without contacting them. `--id`
+accepts hex, `note`, and `nevent`; `--author` and public identity options accept
+hex, `npub`, and `nprofile`. Select data sources explicitly. An exact ID does
+not bypass graph filtering. Decoding a reference does not verify an event.
+
+`events verify` checks event IDs and signatures without graph setup or network
+access. It accepts a single event, JSON array, or JSONL and reports a count.
+`--jsonl` emits all verified events only after the entire input passes. This
+checks signatures, not every NIP's semantics or an author's trustworthiness.
+
+```sh
+iris-nostr events verify --events notes.jsonl
+iris-nostr events verify --events notes.jsonl --jsonl
+
+# Standard signed-event JSONL works between tools. Preserve upstream failures.
+set -o pipefail
+nak req -k 1 -l 100 relay.primal.net | iris-nostr events query --events - --offline
+```
+
+`--events -` reads stdin once, keeps it in memory, and uses the same 128 MiB
+input limit as files. `events verify` defaults to stdin; queries require the
+explicit `--events -`. No temporary event file is written. Empty input is valid
+and returns zero events. JSONL reports stay on stderr.
+
+## Relationship to nak
+
+[nak](https://github.com/fiatjaf/nak) is a separate, broad Nostr toolbox, written
+in Go. Iris Nostr uses Rust's existing `nostr` primitives and the shared
+`nostr-pubsub`, Hashtree and social-graph crates. There is no nak dependency,
+subprocess wrapper, or promise of command-line compatibility.
+
+| Job | Tool |
+| --- | --- |
+| Graph-filtered discovery, Hashtree index reads, bounded offline queries | Iris Nostr |
+| Public reference decoding and signed-event verification | Either tool |
+| General event signing/publishing, relay administration, protocol experiments | nak |
+| Double-ratchet messaging and its identities | Iris Chat |
+| Market operations | Iris Market |
+
+Add small protocol utilities when they improve agent discovery workflows and
+reuse existing Rust primitives. Keep broad nak parity, signer management,
+servers, and unrelated applications outside this project's scope. Signed-event
+JSONL is the interoperability boundary; calling agents can compose tools.
+
 ## Social graph and public identity
 
 Use the same **public** identity as another app with `--identity HEX_OR_NPUB`.
@@ -197,7 +256,8 @@ See [RELEASING.md](RELEASING.md) for the locked build and publication gates.
 
 ## Reuse and boundaries
 
-The `iris_nostr` Rust library exposes `Sources`, `Request`, `query`, graph loading
+The `iris_nostr` Rust library exposes `Sources`, `Request`, `query`,
+`query_with_events` for in-memory input, public reference helpers, graph loading
 and read-only block access without CLI types. A native app can consume it if
 this exact composition is useful; reusable protocol work belongs in the
 existing `nostr-pubsub`, Hashtree and social-graph crates. There is no extracted

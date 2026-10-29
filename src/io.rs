@@ -5,18 +5,24 @@ use std::{fs::File, io::Read, path::Path};
 pub const MAX_INPUT: u64 = 128 * 1024 * 1024;
 
 pub fn read_bounded(path: &Path) -> Result<Vec<u8>> {
+    read_bounded_from(File::open(path).context("open input")?)
+}
+
+pub fn read_bounded_from(reader: impl Read) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
-    File::open(path)
-        .context("open input")?
-        .take(MAX_INPUT + 1)
-        .read_to_end(&mut bytes)?;
+    reader.take(MAX_INPUT + 1).read_to_end(&mut bytes)?;
     ensure!(bytes.len() as u64 <= MAX_INPUT, "input exceeds 128 MiB");
     Ok(bytes)
 }
 
 /// Signed Nostr JSON array, single event, or JSONL. Verify before graph ingestion.
 pub fn read_events(path: &Path) -> Result<Vec<Event>> {
-    let bytes = read_bounded(path)?;
+    read_events_from(File::open(path).context("open input")?)
+}
+
+/// Read and verify the whole bounded input before returning any events.
+pub fn read_events_from(reader: impl Read) -> Result<Vec<Event>> {
+    let bytes = read_bounded_from(reader)?;
     let text = std::str::from_utf8(&bytes)?.trim();
     let events: Vec<Event> = if text.starts_with('[') {
         serde_json::from_str(text)?

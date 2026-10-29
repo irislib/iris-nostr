@@ -52,3 +52,17 @@ of source commits. No private key is needed.
 
 Messaging belongs to Iris Chat's `iris` CLI and its own skill. Market actions
 belong to Iris Market's CLI. Read-only discovery does not authorize either.
+
+Use `decode` to inspect public npub/nprofile/note/nevent/naddr references,
+including `nostr:` links. Relay hints are returned as data, never followed
+automatically. Query exact events with `--id HEX_OR_NOTE_OR_NEVENT`; this retains
+graph policy. `--filter` accepts standard Nostr fields and tag filters such as
+`{"kinds":[1],"#t":["nostr"]}`.
+
+Use `events verify --events FILE` (or `--events -` for stdin) for offline ID and
+signature checks without a graph. `--jsonl` emits verified events only after
+the whole input passes. Queries also accept `--events -` for in-memory input.
+Preserve upstream exit statuses with `set -o pipefail` when composing commands.
+Standard signed-event JSONL can come from nak; it is not a runtime dependency.
+Keep nak for broad signing/publishing, relay administration and protocol tools.
+These remain separate operations requiring the user's authorization.

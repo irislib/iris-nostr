@@ -10,3 +10,7 @@ Default public graph entry point: Sirius Business Ltd; graph filtering defaults 
 two hops, with explicit --no-social-filter opt-out. Never silently widen a query
 when the graph is missing. Model inference belongs to the calling agent.
 Keep private data out of commits and Cargo/plugin archives. See RELEASING.md.
+
+Keep nak as a separate protocol toolbox. Add only small discovery/inspection
+utilities backed by existing Rust primitives; compose tools through signed-event
+JSONL. Do not add a nak runtime dependency or broad command-compatibility layer.
