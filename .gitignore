@@ -36,3 +36,11 @@ profiles/
 **/state.json
 **/.writer.lock
 **/blobs/
+
+# Local signing inputs and outputs from the README examples.
+/keys
+*.keys
+/draft.json
+/signed.json
+*.unsigned.json
+*.signed.json
