@@ -146,7 +146,8 @@ iris-nostr events query --daemon http://127.0.0.1:8080 --index "$EVENT_INDEX_ROO
 iris-nostr events query --daemon http://127.0.0.1:8080 --kind 1
 ```
 
-Roots accept `nhash`, a hash or `hash:key`; an arbitrary file tree is not an
+Roots accept `nhash`, a hash or `hash:key`. Encrypted roots preserve legacy
+32-byte keys and the full 33-byte CHK or randomized key. An arbitrary file tree is not an
 event index. Exported `--blocks` files are flat, named by SHA-256 hash, and
 verified on read. Cache `blobs/` uses the sharded `hashtree-fs` format instead.
 The daemon provides blocks with `--index`, or Nostr events without it. Use its

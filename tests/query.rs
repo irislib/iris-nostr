@@ -169,6 +169,40 @@ async fn hashtree_index_and_missing_partition_report_partial() {
         .unwrap();
     }
     let root = cache.root_cid().await.unwrap();
+    // Read the same index through each supported root key and reference encoding.
+    // Child CIDs retain their original keys.
+    use hashtree_core::{
+        Cid, EncryptionMode, NHashData, decrypt_object, encrypt_object, nhash_encode_full, sha256,
+    };
+    let stored_root = store.get(&root.hash).await.unwrap().unwrap();
+    let plaintext = decrypt_object(&stored_root, &root.key.unwrap()).unwrap();
+    for mode in [
+        EncryptionMode::LegacyChk,
+        EncryptionMode::ChkV1,
+        EncryptionMode::RndV1,
+    ] {
+        let (bytes, key) = encrypt_object(&plaintext, mode).unwrap();
+        let cid = Cid::encrypted(sha256(&bytes), key);
+        std::fs::write(dir.path().join(to_hex(&cid.hash)), bytes).unwrap();
+        let nhash = nhash_encode_full(&NHashData {
+            hash: cid.hash,
+            decrypt_key: cid.key,
+        })
+        .unwrap();
+        for reference in [cid.to_string(), nhash] {
+            assert_eq!(iris_nostr::parse_root(&reference).unwrap(), cid);
+            let report = query(request(Sources {
+                indexes: vec![reference],
+                blocks: Some(dir.path().into()),
+                ..Default::default()
+            }))
+            .await
+            .unwrap();
+            assert_eq!(report["partial"], false);
+            assert_eq!(report["events"][0]["event"]["id"], event.id.to_hex());
+        }
+    }
+
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let daemon_url = format!("http://{}", listener.local_addr().unwrap());
