@@ -27,6 +27,47 @@ fn request(mut sources: Sources) -> Request {
     }
 }
 
+#[test]
+fn graph_list_ties_keep_the_lowest_event_id_across_snapshot_versions() {
+    use nostr_social_graph::BinaryBudget;
+
+    let dir = TempDir::new().unwrap();
+    let root = Keys::generate();
+    let identity = root.public_key().to_hex();
+    let mut lists = [Keys::generate(), Keys::generate()].map(|followed| {
+        EventBuilder::new(Kind::ContactList, "")
+            .tags([Tag::public_key(followed.public_key())])
+            .custom_created_at(Timestamp::from(10))
+            .sign_with_keys(&root)
+            .unwrap()
+    });
+    lists.sort_by_key(|event| event.id);
+    let winner = lists[0].id.to_hex();
+    let followed = lists[0].tags.iter().next().unwrap().as_slice()[1].clone();
+    for order in [lists.clone(), [lists[1].clone(), lists[0].clone()]] {
+        let input = save(&dir, "graph.json", &order);
+        let graph = iris_nostr::graph::load_graph(&identity, &input).unwrap();
+        assert_eq!(graph.get_list_revision(&identity, 3).unwrap().id, winner);
+        for version in [3, 4] {
+            let bytes = graph
+                .to_binary_with_budget_version(BinaryBudget::default(), version)
+                .unwrap();
+            let path = dir.path().join(format!("graph-v{version}.bin"));
+            std::fs::write(&path, &bytes).unwrap();
+            let restored = iris_nostr::graph::load_graph(&identity, &path).unwrap();
+            assert_eq!(restored.get_followed_by_user(&identity).len(), 1);
+            assert!(restored.get_followed_by_user(&identity).contains(&followed));
+            if version == 4 {
+                assert_eq!(
+                    restored.get_list_revision(&identity, 3),
+                    graph.get_list_revision(&identity, 3)
+                );
+            }
+            iris_nostr::snapshot::validate(&bytes, None, &identity).unwrap();
+        }
+    }
+}
+
 #[tokio::test]
 async fn local_query_deduplicates_and_retains_provenance() {
     let dir = TempDir::new().unwrap();

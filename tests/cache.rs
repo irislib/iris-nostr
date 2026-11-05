@@ -259,18 +259,12 @@ fn graph_refresh_uses_existing_daemon_snapshot_and_preserves_on_bad_digest() {
     let key = Keys::generate();
     let identity = key.public_key().to_hex();
     let input = dir.path().join("follows.json");
-    fs::write(
-        &input,
-        serde_json::to_vec(
-            &EventBuilder::new(Kind::ContactList, "")
-                .tags([nostr::Tag::public_key(Keys::generate().public_key())])
-                .custom_created_at(Timestamp::from(7))
-                .sign_with_keys(&key)
-                .unwrap(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
+    let follows = EventBuilder::new(Kind::ContactList, "")
+        .tags([nostr::Tag::public_key(Keys::generate().public_key())])
+        .custom_created_at(Timestamp::from(7))
+        .sign_with_keys(&key)
+        .unwrap();
+    fs::write(&input, serde_json::to_vec(&follows).unwrap()).unwrap();
     let graph = iris_nostr::graph::load_graph(&identity, &input).unwrap();
     let bytes = graph.to_binary().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -306,6 +300,15 @@ fn graph_refresh_uses_existing_daemon_snapshot_and_preserves_on_bad_digest() {
         &identity,
     ]));
     let before = fs::read(&path).unwrap();
+    let refreshed = iris_nostr::graph::load_graph(&identity, &path).unwrap();
+    assert_eq!(
+        refreshed.get_list_revision(&identity, 3),
+        Some(nostr_social_graph::ListRevision {
+            id: follows.id.to_hex(),
+            created_at: 7,
+            complete: true,
+        })
+    );
     let status = success(cli(&[
         "graph",
         "status",

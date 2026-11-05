@@ -174,6 +174,8 @@ contain graph state, not individual signatures.
 `graph refresh` accepts an existing daemon or an explicitly trusted `--url`,
 with optional `--sha256`; failures preserve the previous snapshot. Continuous
 crawling belongs to Hashtree. Check freshness and coverage with `graph status`.
+Both legacy v3 and revision-aware v4 snapshots are supported. Refresh only
+downloads the selected snapshot; it never falls back to relay crawling.
 
 `--config profile.json` / `IRIS_NOSTR_CONFIG` selects shared public settings;
 `iris-nostr config` shows them and the defaults. Paths resolve relative to the
