@@ -176,6 +176,8 @@ with optional `--sha256`; failures preserve the previous snapshot. Continuous
 crawling belongs to Hashtree. Check freshness and coverage with `graph status`.
 Both legacy v3 and revision-aware v4 snapshots are supported. Refresh only
 downloads the selected snapshot; it never falls back to relay crawling.
+Rust library callers that name the returned graph type must use
+`nostr-social-graph` 0.2 with Iris Nostr 0.6.
 
 `--config profile.json` / `IRIS_NOSTR_CONFIG` selects shared public settings;
 `iris-nostr config` shows them and the defaults. Paths resolve relative to the

@@ -1,6 +1,6 @@
 {
   "name": "iris-nostr",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Query, sign and publish Nostr events using existing identities, graph filters and caches.",
   "author": {
     "name": "Sirius Business Ltd"
