@@ -7,6 +7,8 @@ use iris_nostr::{
 use nostr::{Filter, Kind, nips::nip19::ToBech32};
 use std::{io::Write, path::PathBuf, time::Duration};
 
+mod post;
+
 #[derive(Parser)]
 #[command(
     name = "iris-nostr",
@@ -22,6 +24,27 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Read a text note from stdin, sign it, save it for retries, and publish it.
+    Publish {
+        /// Exact existing Hashtree alias or public key. Never a secret key.
+        #[arg(long)]
+        signer: String,
+        /// Existing Hashtree-format file; defaults to Hashtree's configured keys path.
+        #[arg(long)]
+        keys_file: Option<PathBuf>,
+        /// Save to a new file before sending (default: user data directory).
+        #[arg(long)]
+        save_signed: Option<PathBuf>,
+        /// Replace configured/default public relays.
+        #[arg(long = "relay")]
+        relays: Vec<String>,
+        /// Deadline per relay, in seconds.
+        #[arg(long, default_value_t = 10)]
+        timeout: u64,
+        /// Sign, validate and save without any networking.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Inspect the selected public source profile. Also honors IRIS_NOSTR_CONFIG.
     Config,
     /// Inspect a portable local event cache without networking.
@@ -285,9 +308,55 @@ fn apply_relay_defaults(sources: &mut Sources, offline: bool) {
     }
 }
 
+fn publish_relays(explicit: Vec<String>, configured: Vec<String>) -> Vec<String> {
+    if !explicit.is_empty() {
+        explicit
+    } else if !configured.is_empty() {
+        configured
+    } else {
+        DEFAULT_RELAYS.iter().map(|url| (*url).into()).collect()
+    }
+}
+
+fn publish_exit_code(report: &serde_json::Value) -> i32 {
+    if report["dry_run"] == true || report["partial"] == false {
+        0
+    } else if report["published_event_count"] == 0 {
+        1
+    } else {
+        3
+    }
+}
+
 async fn run(cli: Cli) -> Result<i32> {
     let mut sources = load_config(cli.config)?;
     match cli.command {
+        Command::Publish {
+            signer,
+            keys_file,
+            save_signed,
+            relays,
+            timeout,
+            dry_run,
+        } => {
+            let draft = post::read_text(std::io::stdin().lock())?;
+            let path = keys_file.unwrap_or_else(hashtree_config::get_keys_path);
+            let event = signing::sign_from_store(draft, &path, &signer)?;
+            let relays = publish_relays(relays, sources.relays);
+            let timeout = Duration::from_secs(timeout);
+            // Reuse the publisher's full offline validation before saving or sending.
+            let mut report =
+                publishing::publish(vec![event.clone()], relays.clone(), timeout, true).await?;
+            let saved = post::save_signed(&event, save_signed)?;
+            eprintln!("{}", serde_json::json!({"signed_event_file":saved}));
+            if !dry_run {
+                report = publishing::publish(vec![event], relays, timeout, false).await?;
+            }
+            report["signed_event_file"] = serde_json::to_value(saved)?;
+            let code = publish_exit_code(&report);
+            println!("{report}");
+            return Ok(code);
+        }
         Command::Identities { keys_file } => {
             let path = keys_file.unwrap_or_else(hashtree_config::get_keys_path);
             println!(
@@ -326,22 +395,10 @@ async fn run(cli: Cli) -> Result<i32> {
             } else {
                 io::read_events(&events)?
             };
-            let relays = if !relays.is_empty() {
-                relays
-            } else if !sources.relays.is_empty() {
-                sources.relays
-            } else {
-                DEFAULT_RELAYS.iter().map(|url| (*url).into()).collect()
-            };
+            let relays = publish_relays(relays, sources.relays);
             let report =
                 publishing::publish(events, relays, Duration::from_secs(timeout), dry_run).await?;
-            let code = if dry_run || report["partial"] == false {
-                0
-            } else if report["published_event_count"] == 0 {
-                1
-            } else {
-                3
-            };
+            let code = publish_exit_code(&report);
             println!("{report}");
             return Ok(code);
         }

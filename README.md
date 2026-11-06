@@ -197,6 +197,41 @@ already share connections or identities.
 
 ## Sign and publish
 
+For an authorized text post, select an existing identity explicitly:
+
+```sh
+echo "Hello Nostr!" | iris-nostr publish --signer bot
+```
+
+`publish` reads UTF-8 text from stdin and creates a kind-1 note, preserving the
+text exactly (including trailing newlines). Empty or whitespace-only input fails.
+It signs offline, validates the event and destinations, saves the signed event,
+then broadcasts it. `--relay` overrides configured/default relays; `--timeout`
+sets the per-relay deadline. `--keys-file` selects an existing Hashtree key file.
+`--dry-run` signs, validates and saves without any networking.
+
+Signed events are saved under `$XDG_DATA_HOME/iris-nostr/signed/<event-id>.json`
+(default: `$HOME/.local/share/iris-nostr/signed/`). Use `--save-signed FILE` to
+choose a new file in an existing directory. Files are written atomically before
+sending, with private permissions on Unix, and existing files are never
+overwritten. If saving fails, nothing is sent. The JSON report includes
+`signed_event_file` along with the usual event IDs and relay results. The saved
+path is also printed on stderr before broadcasting, so it remains available if
+the process is interrupted. These files contain post content; keep them private
+until publication is intended, and retain them for retries as needed.
+
+Retry that file without signing again or needing access to keys:
+
+```sh
+iris-nostr events publish --events /path/from/signed_event_file.json
+```
+
+Rerunning `publish` creates a new timestamped event and can create another post.
+Saved files are recovery copies, with no automatic retry or cleanup service.
+
+For custom kinds, tags, timestamps, or separate signing and publishing steps,
+use the low-level commands below.
+
 An unsigned draft is one JSON object:
 
 ```json

@@ -70,6 +70,12 @@ from the discovery root, pass a secret as an argument, or open Chat's database.
 The signer must match the user's intended account. A linked device is not an
 owner signer. Use another app's supported signer if it owns the key.
 
+For an authorized text post, pipe UTF-8 text to `publish --signer ALIAS_OR_NPUB`.
+It saves the signed event before sending; `--save-signed FILE` chooses a new
+file, and `--dry-run` signs and saves offline. Use the reported
+`signed_event_file` with `events publish --events FILE` for retries. Rerunning
+the text command can create a new post; saved files have no automatic retries.
+
 `events publish --events FILE --dry-run` validates without networking; omit
 `--dry-run` only for authorized publication. It accepts signed JSON/JSONL and
 waits for matching relay OKs. Inspect per-event `accepted_by` and per-relay
