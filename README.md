@@ -165,8 +165,12 @@ iris-nostr graph refresh --daemon http://127.0.0.1:8080
 ```
 
 `graph fetch` explicitly downloads the checksum-pinned
-[nostr-social-graph bootstrap](https://github.com/mmalmi/nostr-social-graph/releases/tag/v3.0.1).
-The 2026-10-29 snapshot covers 31,187 identities within three company-root hops.
+[nostr-social-graph bootstrap](https://github.com/mmalmi/nostr-social-graph/blob/957d2ec73a51166e8acd525ec3946617b3153007/ts/data/socialGraph.bin).
+This 1,034,502-byte v4 projection contains 21,323 identities within three
+company-root hops and 283 follow-list / 101 mute-list event IDs. Some lists
+are partial; the snapshot does not claim complete network coverage or freshness
+for every included list. Existing personal caches are read as they are; only
+an explicit fetch or refresh replaces the selected file.
 For another root, supply graph data covering its network. `--graph` accepts
 signed follow/mute JSON(L), or a trusted binary `.bin` snapshot. Binary snapshots
 contain graph state, not individual signatures.
@@ -177,7 +181,7 @@ crawling belongs to Hashtree. Check freshness and coverage with `graph status`.
 Both legacy v3 and revision-aware v4 snapshots are supported. Refresh only
 downloads the selected snapshot; it never falls back to relay crawling.
 Rust library callers that name the returned graph type must use
-`nostr-social-graph` 0.2 with Iris Nostr 0.6.
+`nostr-social-graph` 0.2.1 with Iris Nostr 0.7.
 
 `--config profile.json` / `IRIS_NOSTR_CONFIG` selects shared public settings;
 `iris-nostr config` shows them and the defaults. Paths resolve relative to the
