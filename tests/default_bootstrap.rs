@@ -51,7 +51,7 @@ fn an_existing_personal_cache_is_used_without_replacing_it_with_the_default() {
         .sign_with_keys(&key)
         .unwrap();
     let events = dir.path().join("events.json");
-    std::fs::write(&events, serde_json::to_vec(&vec![&event]).unwrap()).unwrap();
+    std::fs::write(&events, serde_json::to_vec(&[&event]).unwrap()).unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_iris-nostr"))
         .env_remove("IRIS_NOSTR_CONFIG")
