@@ -16,7 +16,7 @@ fn pinned_default_preserves_follow_and_mute_revisions() {
     assert_eq!(graph.size().users, 21_323);
     assert_eq!(graph.get_followed_by_user(graph.get_root()).len(), 2);
     let mut revisions = graph.get_list_revisions();
-    let count = |kind, complete| {
+    let count = |kind: u32, complete: bool| {
         revisions
             .iter()
             .filter(|(_, actual, revision)| *actual == kind && (!complete || revision.complete))
